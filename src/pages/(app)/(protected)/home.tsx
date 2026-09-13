@@ -752,6 +752,25 @@ function ElementStage({
     onOpen(eventId)
   }
 
+  async function addSketchEvent() {
+    const nextOrder = Math.max(0, ...elements.map((element) => element.data.order)) + 1
+    const eventId = await create({
+      projectId: project.recordId,
+      section: 'plot',
+      type: 'Plot point',
+      title: 'Untitled event',
+      summary: '',
+      canonState: 'Sketch',
+      fields: { description: '', cause: '', consequence: '', timelinePosition: '' },
+      fieldProvenance: {},
+      relationships: [],
+      coverage: 0,
+      version: 1,
+      order: nextOrder,
+    })
+    onOpen(eventId)
+  }
+
   async function useTrope(trope: Trope) {
     await create({
       projectId: project.recordId,
@@ -870,7 +889,7 @@ function ElementStage({
 
         {setupReady && <TropeSuggestions stage={stage} genre={project.data.genre} hasWrittenContent={elements.some((element) => isElementComplete(element.data))} onUse={useTrope} />}
 
-        {stage === 'plot' ? <PlotEventTimeline project={project} elements={elements} onOpen={onOpen} onAddEvent={addTimelineEvent} aiEnabled={aiEnabled} /> : <div className={cn('mt-5 grid gap-3 transition-opacity sm:grid-cols-2 xl:grid-cols-3', !setupReady && 'pointer-events-none opacity-0')}>
+        {stage === 'plot' ? <PlotEventTimeline project={project} elements={elements} onOpen={onOpen} onAddEvent={addTimelineEvent} onAddSketchEvent={addSketchEvent} aiEnabled={aiEnabled} /> : <div className={cn('mt-5 grid gap-3 transition-opacity sm:grid-cols-2 xl:grid-cols-3', !setupReady && 'pointer-events-none opacity-0')}>
           {aiEnabled && cardIdeas.map((idea) => (
             <article key={idea.recordId} className="rounded-lg border border-dashed border-primary/50 bg-primary/5 p-4">
               <div className="flex items-start justify-between gap-3">
@@ -1693,7 +1712,7 @@ function formatTimelineTimestamp(days: number, units: typeof TIME_UNITS) {
   return timestamp || `0 ${units.at(-1)?.label ?? 'days'}`
 }
 
-function PlotEventTimeline({ project, elements, onOpen, onAddEvent, aiEnabled }: { project: RecordData<Project>; elements: RecordData<StoryElement>[]; onOpen: (id: string) => void; onAddEvent: (days: number, detail?: { title: string; summary: string }) => void; aiEnabled: boolean }) {
+function PlotEventTimeline({ project, elements, onOpen, onAddEvent, onAddSketchEvent, aiEnabled }: { project: RecordData<Project>; elements: RecordData<StoryElement>[]; onOpen: (id: string) => void; onAddEvent: (days: number, detail?: { title: string; summary: string }) => void; onAddSketchEvent: () => void; aiEnabled: boolean }) {
   const trackRef = useRef<HTMLDivElement>(null)
   const [view, setView] = useState<'timeline' | 'events'>('timeline')
   const [selectedId, setSelectedId] = useState<string | null>(null)
@@ -1942,7 +1961,7 @@ function PlotEventTimeline({ project, elements, onOpen, onAddEvent, aiEnabled }:
         <button type="button" onClick={() => setView('timeline')} className={cn('border-b-2 px-2 pb-2 text-sm font-medium', view === 'timeline' ? 'border-primary text-foreground' : 'border-transparent text-muted-foreground')}>Timeline</button>
         <button type="button" onClick={() => setView('events')} className={cn('border-b-2 px-2 pb-2 text-sm font-medium', view === 'events' ? 'border-primary text-foreground' : 'border-transparent text-muted-foreground')}>Events</button>
       </div>
-      {view === 'events' ? <EventOrganizer elements={elements} spanDays={span} selectedId={selectedId} onSelect={setSelectedId} /> : <div ref={trackRef} onScroll={updateTimelineViewport}
+      {view === 'events' ? <EventOrganizer elements={elements} spanDays={span} selectedId={selectedId} onSelect={setSelectedId} onAddSketchEvent={onAddSketchEvent} /> : <div ref={trackRef} onScroll={updateTimelineViewport}
         onPointerMove={(event) => {
           if (event.pointerType === 'touch') return
           const viewport = event.currentTarget
@@ -2021,7 +2040,7 @@ function PlotEventTimeline({ project, elements, onOpen, onAddEvent, aiEnabled }:
   )
 }
 
-function EventOrganizer({ elements, spanDays, selectedId, onSelect }: { elements: RecordData<StoryElement>[]; spanDays: number; selectedId: string | null; onSelect: (id: string) => void }) {
+function EventOrganizer({ elements, spanDays, selectedId, onSelect, onAddSketchEvent }: { elements: RecordData<StoryElement>[]; spanDays: number; selectedId: string | null; onSelect: (id: string) => void; onAddSketchEvent: () => void }) {
   const { put } = useMutations<StoryElement>('elements')
   const ordered = useMemo(() => elements.filter((element) => Number.isFinite(Number(element.data.fields.timelinePosition)) && element.data.fields.timelinePosition.trim() !== '').sort((a, b) => Number(a.data.fields.timelinePosition) - Number(b.data.fields.timelinePosition) || a.data.order - b.data.order), [elements])
   const unordered = useMemo(() => elements.filter((element) => !Number.isFinite(Number(element.data.fields.timelinePosition)) || element.data.fields.timelinePosition.trim() === '').sort((a, b) => a.data.order - b.data.order), [elements])
@@ -2066,7 +2085,7 @@ function EventOrganizer({ elements, spanDays, selectedId, onSelect }: { elements
     </section>
     <div className="my-6 border-t-2 border-dotted border-muted-foreground/60" aria-hidden />
     <section onDragOver={(event) => event.preventDefault()} onDrop={() => { if (draggedId) void moveEvent(draggedId, 'unordered') }}>
-      <p className="mb-3 text-xs font-semibold uppercase tracking-wide text-muted-foreground">Unordered sketches</p>
+      <div className="mb-3 flex items-center justify-between gap-3"><p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Unordered sketches</p><Button variant="outline" size="sm" onClick={onAddSketchEvent}><Plus aria-hidden />New Event</Button></div>
       <div className="grid grid-cols-[repeat(auto-fill,minmax(160px,1fr))] gap-3">
         {unordered.length ? unordered.map((element) => <EventStub key={element.recordId} element={element} destination="unordered" />) : <p className="col-span-full rounded-md border border-dashed border-border p-5 text-sm text-muted-foreground">Drag an event here when its chronology is still a sketch.</p>}
       </div>
