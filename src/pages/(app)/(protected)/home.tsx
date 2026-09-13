@@ -22,6 +22,9 @@ import {
   ZoomIn,
   ZoomOut,
 } from 'lucide-react'
+import { DndContext, PointerSensor, closestCenter, useSensor, useSensors, type DragEndEvent } from '@dnd-kit/core'
+import { SortableContext, rectSortingStrategy, useSortable } from '@dnd-kit/sortable'
+import { CSS } from '@dnd-kit/utilities'
 import {
   Badge,
   Button,
@@ -2045,6 +2048,7 @@ function EventOrganizer({ elements, spanDays, selectedId, onSelect, onAddSketchE
   const ordered = useMemo(() => elements.filter((element) => Number.isFinite(Number(element.data.fields.timelinePosition)) && element.data.fields.timelinePosition.trim() !== '').sort((a, b) => Number(a.data.fields.timelinePosition) - Number(b.data.fields.timelinePosition) || a.data.order - b.data.order), [elements])
   const unordered = useMemo(() => elements.filter((element) => !Number.isFinite(Number(element.data.fields.timelinePosition)) || element.data.fields.timelinePosition.trim() === '').sort((a, b) => a.data.order - b.data.order), [elements])
   const [draggedId, setDraggedId] = useState<string | null>(null)
+  const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 6 } }))
   const span = spanDays
   const eventStep = TIME_UNITS[0].days
 
@@ -2069,28 +2073,37 @@ function EventOrganizer({ elements, spanDays, selectedId, onSelect, onAddSketchE
     setDraggedId(null)
   }
 
+  function handleDragEnd(event: DragEndEvent) {
+    const targetId = event.over?.id.toString() ?? ''
+    if (!event.active.id || !targetId) return
+    const destination = targetId === 'unordered-drop' || unordered.some((item) => item.recordId === targetId) ? 'unordered' : 'ordered'
+    void moveEvent(targetId, destination)
+  }
+
   function EventStub({ element, destination }: { element: RecordData<StoryElement>; destination: 'ordered' | 'unordered' }) {
-    return <button type="button" draggable onDragStart={(event) => { event.dataTransfer.effectAllowed = 'move'; event.dataTransfer.setData('text/plain', element.recordId); setDraggedId(element.recordId) }} onDragEnd={() => setDraggedId(null)} onDragOver={(event) => { event.preventDefault(); event.dataTransfer.dropEffect = 'move' }} onDrop={(event) => { event.preventDefault(); event.stopPropagation(); void moveEvent(element.recordId, destination) }} onClick={() => onSelect(element.recordId)} className={cn('relative z-10 min-h-16 rounded-md border border-border bg-background p-3 text-left transition-colors hover:border-primary', selectedId === element.recordId && 'border-primary ring-2 ring-primary/20', draggedId === element.recordId && 'opacity-50')}>
+    const sortable = useSortable({ id: element.recordId })
+    const style = { transform: CSS.Transform.toString(sortable.transform), transition: sortable.transition }
+    return <button ref={sortable.setNodeRef} style={style} type="button" {...sortable.attributes} {...sortable.listeners} onClick={() => onSelect(element.recordId)} className={cn('relative z-10 min-h-16 touch-none rounded-md border border-border bg-background p-3 text-left transition-colors hover:border-primary', selectedId === element.recordId && 'border-primary ring-2 ring-primary/20', sortable.isDragging && 'z-20 opacity-50')}>
       <span className="block truncate text-sm font-medium text-foreground">{element.data.title || 'Untitled event'}</span>
       <span className="mt-1 block line-clamp-2 text-xs text-muted-foreground">{element.data.summary || firstFilledField(element.data) || 'Open to add a description.'}</span>
     </button>
   }
 
-  return <div className="mt-5 max-h-[560px] overflow-y-auto pr-1">
-    <section onDragOver={(event) => event.preventDefault()} onDrop={() => { if (draggedId) void moveEvent(ordered.at(-1)?.recordId ?? '', 'ordered') }}>
+  return <DndContext sensors={sensors} collisionDetection={closestCenter} onDragStart={(event) => setDraggedId(event.active.id.toString())} onDragCancel={() => setDraggedId(null)} onDragEnd={handleDragEnd}><div className="mt-5 max-h-[560px] overflow-y-auto pr-1">
+    <section id="ordered-drop">
       <p className="mb-3 text-xs font-semibold uppercase tracking-wide text-muted-foreground">Ordered events</p>
-      <div className="relative grid grid-cols-[repeat(auto-fill,minmax(160px,1fr))] gap-3 before:pointer-events-none before:absolute before:left-0 before:right-0 before:top-1/2 before:h-px before:-translate-y-1/2 before:bg-border">
+      <SortableContext items={ordered.map((element) => element.recordId)} strategy={rectSortingStrategy}><div className="relative grid grid-cols-[repeat(auto-fill,minmax(160px,1fr))] gap-3 before:pointer-events-none before:absolute before:left-0 before:right-0 before:top-1/2 before:h-px before:-translate-y-1/2 before:bg-border">
         {ordered.length ? ordered.map((element) => <EventStub key={element.recordId} element={element} destination="ordered" />) : <p className="col-span-full rounded-md border border-dashed border-border p-5 text-sm text-muted-foreground">Drag events here to place them on the story timeline.</p>}
-      </div>
+      </div></SortableContext>
     </section>
     <div className="my-6 border-t-2 border-dotted border-muted-foreground/60" aria-hidden />
-    <section onDragOver={(event) => event.preventDefault()} onDrop={() => { if (draggedId) void moveEvent(draggedId, 'unordered') }}>
+    <section id="unordered-drop">
       <div className="mb-3 flex items-center justify-between gap-3"><p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Unordered sketches</p><Button variant="outline" size="sm" onClick={onAddSketchEvent}><Plus aria-hidden />New Event</Button></div>
-      <div className="grid grid-cols-[repeat(auto-fill,minmax(160px,1fr))] gap-3">
+      <SortableContext items={unordered.map((element) => element.recordId)} strategy={rectSortingStrategy}><div className="grid grid-cols-[repeat(auto-fill,minmax(160px,1fr))] gap-3">
         {unordered.length ? unordered.map((element) => <EventStub key={element.recordId} element={element} destination="unordered" />) : <p className="col-span-full rounded-md border border-dashed border-border p-5 text-sm text-muted-foreground">Drag an event here when its chronology is still a sketch.</p>}
-      </div>
+      </div></SortableContext>
     </section>
-  </div>
+  </div></DndContext>
 }
 
 function formatEventTime(days: number, unit: { label: string; days: number }) {
