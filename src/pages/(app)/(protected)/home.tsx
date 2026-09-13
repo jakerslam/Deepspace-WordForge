@@ -2051,7 +2051,7 @@ function EventOrganizer({ elements, spanDays, selectedId, onSelect }: { elements
   }
 
   function EventStub({ element, destination }: { element: RecordData<StoryElement>; destination: 'ordered' | 'unordered' }) {
-    return <button type="button" draggable onDragStart={() => setDraggedId(element.recordId)} onDragEnd={() => setDraggedId(null)} onDragOver={(event) => event.preventDefault()} onDrop={() => { void moveEvent(element.recordId, destination) }} onClick={() => onSelect(element.recordId)} className={cn('min-h-16 rounded-md border border-border bg-background p-3 text-left transition-colors hover:border-primary', selectedId === element.recordId && 'border-primary ring-2 ring-primary/20', draggedId === element.recordId && 'opacity-50')}>
+    return <button type="button" draggable onDragStart={(event) => { event.dataTransfer.effectAllowed = 'move'; event.dataTransfer.setData('text/plain', element.recordId); setDraggedId(element.recordId) }} onDragEnd={() => setDraggedId(null)} onDragOver={(event) => { event.preventDefault(); event.dataTransfer.dropEffect = 'move' }} onDrop={(event) => { event.preventDefault(); event.stopPropagation(); void moveEvent(element.recordId, destination) }} onClick={() => onSelect(element.recordId)} className={cn('relative z-10 min-h-16 rounded-md border border-border bg-background p-3 text-left transition-colors hover:border-primary', selectedId === element.recordId && 'border-primary ring-2 ring-primary/20', draggedId === element.recordId && 'opacity-50')}>
       <span className="block truncate text-sm font-medium text-foreground">{element.data.title || 'Untitled event'}</span>
       <span className="mt-1 block line-clamp-2 text-xs text-muted-foreground">{element.data.summary || firstFilledField(element.data) || 'Open to add a description.'}</span>
     </button>
@@ -2060,11 +2060,11 @@ function EventOrganizer({ elements, spanDays, selectedId, onSelect }: { elements
   return <div className="mt-5 max-h-[560px] overflow-y-auto pr-1">
     <section onDragOver={(event) => event.preventDefault()} onDrop={() => { if (draggedId) void moveEvent(ordered.at(-1)?.recordId ?? '', 'ordered') }}>
       <p className="mb-3 text-xs font-semibold uppercase tracking-wide text-muted-foreground">Ordered events</p>
-      <div className="grid grid-cols-[repeat(auto-fill,minmax(160px,1fr))] gap-3">
+      <div className="relative grid grid-cols-[repeat(auto-fill,minmax(160px,1fr))] gap-3 before:pointer-events-none before:absolute before:left-0 before:right-0 before:top-1/2 before:h-px before:-translate-y-1/2 before:bg-border">
         {ordered.length ? ordered.map((element) => <EventStub key={element.recordId} element={element} destination="ordered" />) : <p className="col-span-full rounded-md border border-dashed border-border p-5 text-sm text-muted-foreground">Drag events here to place them on the story timeline.</p>}
       </div>
     </section>
-    <div className="my-6 border-t border-dotted border-muted-foreground/60" />
+    <div className="my-6 border-t-2 border-dotted border-muted-foreground/60" aria-hidden />
     <section onDragOver={(event) => event.preventDefault()} onDrop={() => { if (draggedId) void moveEvent(draggedId, 'unordered') }}>
       <p className="mb-3 text-xs font-semibold uppercase tracking-wide text-muted-foreground">Unordered sketches</p>
       <div className="grid grid-cols-[repeat(auto-fill,minmax(160px,1fr))] gap-3">
