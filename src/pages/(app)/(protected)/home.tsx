@@ -6,6 +6,8 @@ import {
   ArrowLeft,
   Check,
   ChevronDown,
+  ChevronLeft,
+  ChevronRight,
   ChevronUp,
   Clock3,
   FileText,
@@ -731,6 +733,25 @@ function ElementStage({
     })
   }
 
+  async function addTimelineEvent(days: number, detail?: { title: string; summary: string }) {
+    const nextOrder = Math.max(0, ...elements.map((element) => element.data.order)) + 1
+    const eventId = await create({
+      projectId: project.recordId,
+      section: 'plot',
+      type: 'Plot point',
+      title: detail?.title || 'New plot point',
+      summary: detail?.summary || '',
+      canonState: 'Sketch',
+      fields: { description: detail?.summary || '', cause: '', consequence: '', timelinePosition: String(Math.round(days * 100) / 100) },
+      fieldProvenance: {},
+      relationships: [],
+      coverage: 0,
+      version: 1,
+      order: nextOrder,
+    })
+    onOpen(eventId)
+  }
+
   async function useTrope(trope: Trope) {
     await create({
       projectId: project.recordId,
@@ -849,7 +870,7 @@ function ElementStage({
 
         {setupReady && <TropeSuggestions stage={stage} genre={project.data.genre} hasWrittenContent={elements.some((element) => isElementComplete(element.data))} onUse={useTrope} />}
 
-        {stage === 'plot' ? <PlotEventTimeline project={project} elements={elements} onOpen={onOpen} /> : <div className={cn('mt-5 grid gap-3 transition-opacity sm:grid-cols-2 xl:grid-cols-3', !setupReady && 'pointer-events-none opacity-0')}>
+        {stage === 'plot' ? <PlotEventTimeline project={project} elements={elements} onOpen={onOpen} onAddEvent={addTimelineEvent} aiEnabled={aiEnabled} /> : <div className={cn('mt-5 grid gap-3 transition-opacity sm:grid-cols-2 xl:grid-cols-3', !setupReady && 'pointer-events-none opacity-0')}>
           {aiEnabled && cardIdeas.map((idea) => (
             <article key={idea.recordId} className="rounded-lg border border-dashed border-primary/50 bg-primary/5 p-4">
               <div className="flex items-start justify-between gap-3">
@@ -931,20 +952,37 @@ function ElementEditor({
   const [titleDraft, setTitleDraft] = useState(element.data.title)
   const [summaryDraft, setSummaryDraft] = useState(element.data.summary)
   const [fieldDrafts, setFieldDrafts] = useState(element.data.fields)
+  const initialPlotPosition = useRef(element.data.fields.timelinePosition ?? '')
   const [newFieldTitle, setNewFieldTitle] = useState('')
   const draftTimers = useRef<Record<string, ReturnType<typeof setTimeout>>>({})
   const [showDeleteModal, setShowDeleteModal] = useState(false)
   const [isDeleting, setIsDeleting] = useState(false)
   const plotSpan = effectiveTimelineSpan(project.data.timelineSpanDays)
   const plotUnit = timelineUnit(plotSpan)
+  const plotTimeUnits = storyTimelineUnits(plotSpan)
   const eventPosition = Number(fieldDrafts.timelinePosition || '')
   const eventDays = Number.isFinite(eventPosition) ? Math.max(0, Math.min(plotSpan, eventPosition)) : 0
+  const eventTimeParts = timelineParts(eventDays, plotTimeUnits)
 
   useEffect(() => {
     setTitleDraft(element.data.title)
     setSummaryDraft(element.data.summary)
     setFieldDrafts(element.data.fields)
+    initialPlotPosition.current = element.data.fields.timelinePosition ?? ''
   }, [element.recordId])
+
+  async function leaveEditor() {
+    const hasPlotContent = element.data.section === 'plot' && (
+      titleDraft !== 'New plot point'
+      || Boolean(summaryDraft.trim())
+      || (fieldDrafts.timelinePosition ?? '') !== initialPlotPosition.current
+      || Object.entries(fieldDrafts).some(([key, value]) => key !== 'timelinePosition' && Boolean(value.trim()))
+    )
+    if (element.data.section === 'plot' && !hasPlotContent) {
+      await removeElement(element.recordId)
+    }
+    onBack()
+  }
 
   function persistDraft(key: string, patch: Partial<StoryElement>) {
     const previous = draftTimers.current[key]
@@ -984,6 +1022,12 @@ function ElementEditor({
     }
     setFieldDrafts(nextFields)
     persistDraft(`field:${fieldKey}`, { fields: nextFields, fieldProvenance: nextProvenance, coverage: elementCoverage({ ...element.data, fields: nextFields }) })
+  }
+
+  function updateEventTimePart(unit: typeof TIME_UNITS[number], value: string) {
+    const nextValue = Math.max(0, Number(value) || 0)
+    const nextDays = plotTimeUnits.reduce((total, part) => total + (part.label === unit.label ? nextValue : eventTimeParts[part.label]) * part.days, 0)
+    draftFieldChange('timelinePosition', String(Math.min(plotSpan, nextDays)))
   }
 
   async function requestSuggestion(fieldKey: string) {
@@ -1092,7 +1136,7 @@ function ElementEditor({
   return (
     <div className="mx-auto flex min-h-full max-w-6xl flex-col px-5 py-5">
       <div className="mb-5 flex items-center justify-between gap-3">
-        <Button variant="ghost" onClick={onBack}>
+        <Button variant="ghost" onClick={() => { void leaveEditor() }}>
           <ArrowLeft aria-hidden />
           Back
         </Button>
@@ -1144,9 +1188,11 @@ function ElementEditor({
 
           {element.data.section === 'plot' && (
             <div className="mt-5 rounded-lg border border-border bg-background p-4">
-              <div className="flex items-center justify-between gap-3"><Label>Timeline placement</Label><span className="text-xs text-muted-foreground">{formatEventTime(eventDays, plotUnit)} into the {formatTimeline(plotSpan)} span</span></div>
+              <div className="flex items-center justify-between gap-3"><Label>Timeline placement</Label><span className="text-xs text-muted-foreground">{formatTimelineTimestamp(eventDays, plotTimeUnits)}</span></div>
               <input type="range" min="0" max="1000" step="1" value={Math.round((eventDays / plotSpan) * 1000)} onChange={(event) => draftFieldChange('timelinePosition', String((Number(event.target.value) / 1000) * plotSpan))} aria-label="Place event on story timeline" className="mt-3 w-full accent-primary" />
-              <div className="mt-3 flex items-center gap-2"><Input type="number" min="0" step="0.1" value={eventDays ? String(Math.round((eventDays / plotUnit.days) * 10) / 10) : ''} onChange={(event) => { const value = Number(event.target.value); draftFieldChange('timelinePosition', Number.isFinite(value) ? String(Math.max(0, Math.min(plotSpan / plotUnit.days, value)) * plotUnit.days) : '') }} placeholder="0" aria-label={`Event time in ${plotUnit.label}`} /><span className="text-sm text-muted-foreground">{plotUnit.label}</span></div>
+              <div className="mt-3 flex flex-wrap items-end gap-2">
+                {plotTimeUnits.map((unit) => <Field key={unit.label} label={unit.label} className="w-20"><Input type="number" min="0" step="1" value={String(eventTimeParts[unit.label])} onChange={(event) => updateEventTimePart(unit, event.target.value)} aria-label={`Event ${unit.label}`} /></Field>)}
+              </div>
             </div>
           )}
 
@@ -1622,13 +1668,44 @@ function timelineUnit(days: number): { label: string; days: number; index: numbe
   return { ...TIME_UNITS[index], index }
 }
 
-function PlotEventTimeline({ project, elements, onOpen }: { project: RecordData<Project>; elements: RecordData<StoryElement>[]; onOpen: (id: string) => void }) {
+function storyTimelineUnits(days: number) {
+  const topUnitIndex = timelineUnit(days).index
+  return TIME_UNITS.slice(Math.max(0, topUnitIndex - 2), topUnitIndex + 1).reverse()
+}
+
+function timelineParts(days: number, units: typeof TIME_UNITS) {
+  let remaining = Math.max(0, days)
+  return Object.fromEntries(units.map((unit) => {
+    const value = Math.floor(remaining / unit.days)
+    remaining -= value * unit.days
+    return [unit.label, value]
+  })) as Record<string, number>
+}
+
+function formatTimelineTimestamp(days: number, units: typeof TIME_UNITS) {
+  const parts = timelineParts(days, units)
+  const timestamp = units.map((unit) => {
+    const value = parts[unit.label]
+    if (value === 0) return null
+    const label = value === 1 ? (unit.label === 'centuries' ? 'century' : unit.label.slice(0, -1)) : unit.label
+    return `${value} ${label}`
+  }).filter((part): part is string => Boolean(part)).join(', ')
+  return timestamp || `0 ${units.at(-1)?.label ?? 'days'}`
+}
+
+function PlotEventTimeline({ project, elements, onOpen, onAddEvent, aiEnabled }: { project: RecordData<Project>; elements: RecordData<StoryElement>[]; onOpen: (id: string) => void; onAddEvent: (days: number, detail?: { title: string; summary: string }) => void; aiEnabled: boolean }) {
   const trackRef = useRef<HTMLDivElement>(null)
   const [selectedId, setSelectedId] = useState<string | null>(null)
   const [zoomLevel, setZoomLevel] = useState(0)
   const [timelineViewport, setTimelineViewport] = useState({ left: 0, width: 900 })
   const [hoverX, setHoverX] = useState<number | null>(null)
   const [activeTimelineDays, setActiveTimelineDays] = useState<number | null>(null)
+  const [eventCursor, setEventCursor] = useState(0)
+  const [focusedEventId, setFocusedEventId] = useState<string | null>(null)
+  const [openTimelineIdeaId, setOpenTimelineIdeaId] = useState<string | null>(null)
+  const requestedTimelineRanges = useRef(new Set<string>())
+  const { records: timelineSuggestions } = useQuery<Suggestion>('suggestions', { where: { projectId: project.recordId }, orderBy: 'createdAt', orderDir: 'desc' })
+  const { create: createTimelineSuggestion, remove: removeTimelineSuggestion } = useMutations<Suggestion>('suggestions')
   const readPosition = (element: RecordData<StoryElement>) => {
     const raw = element.data.fields.timelinePosition?.trim() ?? ''
     if (!raw) return null
@@ -1657,18 +1734,14 @@ function PlotEventTimeline({ project, elements, onOpen }: { project: RecordData<
     totalSmallestUnits * MIN_TIMELINE_TICK_SPACING_PX,
   )
   const trackWidthPixels = measuredTimelineWidthPixels + TIMELINE_EDGE_PADDING_PX * 2
+  const viewportStartDays = Math.max(0, ((timelineViewport.left - TIMELINE_EDGE_PADDING_PX) / measuredTimelineWidthPixels) * span)
+  const viewportEndDays = Math.min(span, ((timelineViewport.left + timelineViewport.width - TIMELINE_EDGE_PADDING_PX) / measuredTimelineWidthPixels) * span)
+  const pendingTimelineIdeas = timelineSuggestions.filter((suggestion) => suggestion.data.status === 'pending' && suggestion.data.fieldKey === '__timeline__')
   const hoverTrackX = hoverX === null ? null : hoverX + timelineViewport.left
   const hoverDays = hoverTrackX === null || hoverTrackX < TIMELINE_EDGE_PADDING_PX || hoverTrackX > trackWidthPixels - TIMELINE_EDGE_PADDING_PX
     ? null
     : ((hoverTrackX - TIMELINE_EDGE_PADDING_PX) / measuredTimelineWidthPixels) * span
-  let remainingHoverUnits = activeTimelineDays === null ? 0 : Math.min(Math.round(activeTimelineDays / smallestUnit.days), Math.floor(span / smallestUnit.days))
-  const hoverTimeLabel = visibleUnits.map((unit) => {
-    const unitsPerMeasure = smallestUnitsPer(TIME_UNITS.indexOf(unit), smallestUnitIndex)
-    const count = Math.floor(remainingHoverUnits / unitsPerMeasure)
-    remainingHoverUnits %= unitsPerMeasure
-    const label = count === 1 ? (unit.label === 'centuries' ? 'century' : unit.label.slice(0, -1)) : unit.label
-    return `${count} ${label}`
-  }).join(', ')
+  const hoverTimeLabel = formatTimelineTimestamp(activeTimelineDays ?? 0, visibleUnits)
   const timelineLeft = (days: number) => TIMELINE_EDGE_PADDING_PX + (days / span) * measuredTimelineWidthPixels
   const timelineLeftStyle = (days: number) => `${timelineLeft(days).toFixed(2)}px`
   const activeMarkerX = activeTimelineDays === null ? null : timelineLeft(activeTimelineDays)
@@ -1703,6 +1776,46 @@ function PlotEventTimeline({ project, elements, onOpen }: { project: RecordData<
   const edgeScrollDirection = hoverX === null ? 0
     : hoverX < timelineViewport.width * 0.05 ? -1
       : hoverX > timelineViewport.width * 0.95 ? 1 : 0
+
+  useEffect(() => {
+    if (!aiEnabled || pendingTimelineIdeas.length || viewportEndDays <= viewportStartDays) return
+    const rangeKey = `${Math.round(viewportStartDays / smallestUnit.days)}:${Math.round(viewportEndDays / smallestUnit.days)}:${zoomLevel}`
+    if (requestedTimelineRanges.current.has(rangeKey)) return
+    requestedTimelineRanges.current.add(rangeKey)
+    const controller = new AbortController()
+    void (async () => {
+      try {
+        const token = await getAuthToken()
+        const response = await fetch('/api/ai/timeline-idea', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', ...(token ? { Authorization: `Bearer ${token}` } : {}) },
+          signal: controller.signal,
+          body: JSON.stringify({ project: { title: project.data.title, genre: project.data.genre, premise: project.data.premise }, startDays: viewportStartDays, endDays: viewportEndDays }),
+        })
+        if (!response.ok || controller.signal.aborted) return
+        const idea = await response.json() as { title?: string; description?: string; positionDays?: number }
+        if (!idea.title || !Number.isFinite(idea.positionDays)) return
+        await createTimelineSuggestion({
+          projectId: project.recordId,
+          elementId: '',
+          fieldKey: '__timeline__',
+          prompt: 'A concise AI event idea for the visible timeline range.',
+          proposedValue: idea.description || '',
+          status: 'pending',
+          revisionInstruction: '',
+          replacesSuggestionId: '',
+          suggestionType: 'card',
+          targetSection: 'plot',
+          proposedFields: { timelinePosition: String(idea.positionDays) },
+          proposedTitle: idea.title,
+          proposedSummary: idea.description || '',
+        })
+      } catch {
+        // A timeline idea is optional and should never interrupt story work.
+      }
+    })()
+    return () => controller.abort()
+  }, [aiEnabled, createTimelineSuggestion, pendingTimelineIdeas.length, project.data.genre, project.data.premise, project.data.title, project.recordId, smallestUnit.days, viewportEndDays, viewportStartDays, zoomLevel])
 
   useEffect(() => {
     const viewport = trackRef.current
@@ -1764,10 +1877,56 @@ function PlotEventTimeline({ project, elements, onOpen }: { project: RecordData<
   // Leave room for event-count badges above the ruler without clipping them.
   const rulerY = 36
   const nearestDistance = activeTimelineDays === null ? Infinity : Math.min(...positions.map(({ position }) => Math.abs(position - activeTimelineDays)))
-  const nearbyPositions = nearestDistance <= smallestUnit.days
-    ? positions.filter(({ position }) => Math.abs(Math.abs(position - (activeTimelineDays ?? 0)) - nearestDistance) < 0.001)
-    : []
-  const timelineHeight = Math.max(96, rulerY + 24 + nearbyPositions.length * 36)
+  const nearestPosition = activeTimelineDays === null || nearestDistance > smallestUnit.days
+    ? null
+    : positions.find(({ position }) => Math.abs(position - activeTimelineDays) === nearestDistance) ?? null
+  const activeTick = nearestPosition === null ? null : Math.round(nearestPosition.position / smallestUnit.days)
+  const nearbyPositions = activeTick === null
+    ? []
+    : positions.filter(({ position }) => Math.round(position / smallestUnit.days) === activeTick)
+  const eventGroupKey = nearbyPositions.map(({ element }) => element.recordId).join(',')
+  const focusedNearbyEvent = focusedEventId ? nearbyPositions.find(({ element }) => element.recordId === focusedEventId) : null
+  const visibleEvent = focusedNearbyEvent ?? nearbyPositions[eventCursor % Math.max(1, nearbyPositions.length)] ?? null
+  const visibleEventLeft = visibleEvent ? timelineLeft(visibleEvent.position) : activeMarkerX
+  useEffect(() => {
+    setEventCursor(0)
+    setFocusedEventId((eventId) => eventId && nearbyPositions.some(({ element }) => element.recordId === eventId) ? eventId : null)
+  }, [eventGroupKey])
+  const timelineIdea = pendingTimelineIdeas[0] ?? null
+  const timelineIdeaPosition = Number(timelineIdea?.data.proposedFields?.timelinePosition)
+  const timelineIdeaLeft = timelineIdea && Number.isFinite(timelineIdeaPosition) ? timelineLeft(timelineIdeaPosition) : null
+  const eventStubTop = rulerY + 16
+  const timelineIdeaTop = rulerY + 6
+  const timelineHeight = 120
+  const eventStepDays = smallestUnit.days
+  const visibleEventIndex = visibleEvent ? positions.findIndex(({ element }) => element.recordId === visibleEvent.element.recordId) : -1
+
+  function acceptTimelineIdea() {
+    if (!timelineIdea || !Number.isFinite(timelineIdeaPosition)) return
+    onAddEvent(timelineIdeaPosition, { title: timelineIdea.data.proposedTitle || 'Suggested event', summary: timelineIdea.data.proposedSummary || timelineIdea.data.proposedValue })
+    void removeTimelineSuggestion(timelineIdea.recordId)
+    setOpenTimelineIdeaId(null)
+  }
+
+  function moveVisibleEvent(direction: -1 | 1) {
+    if (visibleEventIndex < 0 || positions.length < 2) return
+    const nextIndex = visibleEventIndex + direction
+    if (nextIndex < 0 || nextIndex >= positions.length) return
+    const next = positions[nextIndex]
+    const viewport = trackRef.current
+    if (viewport && visibleEventLeft !== null) {
+      const currentViewportX = visibleEventLeft - viewport.scrollLeft
+      const nextLeft = timelineLeft(next.position)
+      const maxScroll = Math.max(0, viewport.scrollWidth - viewport.clientWidth)
+      const nextScrollLeft = Math.max(0, Math.min(maxScroll, nextLeft - currentViewportX))
+      viewport.scrollTo({ left: nextScrollLeft, behavior: 'smooth' })
+      setTimelineViewport({ left: nextScrollLeft, width: viewport.clientWidth || 900 })
+    }
+    setActiveTimelineDays(next.position)
+    setFocusedEventId(next.element.recordId)
+    setHoverX(null)
+    setEventCursor(0)
+  }
 
   return (
     <section className="mt-5 w-full min-w-0 max-w-full overflow-hidden rounded-lg border border-border bg-card p-4">
@@ -1809,26 +1968,30 @@ function PlotEventTimeline({ project, elements, onOpen }: { project: RecordData<
               : 0
             return (
               <span key={`${tick.days}-${index}`} className={cn('absolute w-px -translate-y-1/2', tick.unit.color, tick.level === 0 ? 'h-8' : tick.level === 1 ? 'h-5' : 'h-3')} style={{ top: `${rulerY}px`, left: timelineLeftStyle(tick.days) }} aria-hidden>
-                {eventCount > 0 && <i className="absolute bottom-full left-1/2 flex h-4 min-w-4 -translate-x-1/2 -translate-y-1 items-center justify-center rounded-full bg-red-500 px-1 text-[9px] font-semibold not-italic leading-4 text-white">{eventCount}</i>}
+                {eventCount > 0 && <i className="absolute bottom-full left-1/2 flex h-4 min-w-4 -translate-x-1/2 -translate-y-1 items-center justify-center rounded-full bg-red-500 px-1 text-[9px] font-bold not-italic leading-4 text-white">{eventCount}</i>}
               </span>
             )
           })}
-          {nearbyPositions.map(({ element, position }, lane) => {
-            const index = positions.findIndex((item) => item.element.recordId === element.recordId)
-            const left = span ? timelineLeft(position) : TIMELINE_EDGE_PADDING_PX + (index / Math.max(1, positions.length - 1)) * measuredTimelineWidthPixels
-            return (
-              <button key={element.recordId} data-event-id={element.recordId} type="button"
-                onPointerEnter={() => setActiveTimelineDays(position)}
-                onClick={() => setSelectedId(element.recordId)}
-                title={element.data.title}
-                className={cn('absolute h-8 w-36 -translate-x-1/2 rounded-md border bg-background px-2 text-left transition-colors hover:border-primary', selected?.recordId === element.recordId && 'border-primary ring-2 ring-primary/20')} style={{ left: `${left.toFixed(2)}px`, top: `${rulerY + 24 + lane * 36}px` }}>
-                <span className="block truncate text-sm font-medium text-foreground">{element.data.title}</span>
+          {activeTimelineDays !== null && visibleEventLeft !== null && !visibleEvent && <button type="button" aria-label="Add event at this time" title="Add event at this time" onClick={() => onAddEvent(activeTimelineDays)} className="absolute z-30 flex size-[30px] -translate-x-1/2 items-center justify-center rounded-full border border-white/30 bg-background text-primary shadow-sm transition-colors hover:border-white hover:bg-accent" style={{ left: `${activeMarkerX?.toFixed(2)}px`, top: `${eventStubTop}px` }}><Plus className="size-4" aria-hidden /></button>}
+          {visibleEvent && visibleEventLeft !== null && (
+            <>
+              <button type="button" aria-label="Add event before this event" title={`Add event ${smallestUnit.label} before`} onClick={() => onAddEvent(Math.max(0, visibleEvent.position - eventStepDays))} className="absolute z-30 flex size-[23px] -translate-x-1/2 items-center justify-center rounded-full border border-white/30 bg-background text-primary shadow-sm transition-colors hover:border-white hover:bg-accent" style={{ left: `${(visibleEventLeft - 104).toFixed(2)}px`, top: `${eventStubTop + 4}px` }}><Plus className="size-3.5" aria-hidden /></button>
+              <button type="button" aria-label="Previous plot event" title="Previous event" onClick={() => moveVisibleEvent(-1)} className="absolute z-30 flex size-7 -translate-x-1/2 items-center justify-center rounded text-muted-foreground transition-colors hover:bg-accent hover:text-foreground" style={{ left: `${(visibleEventLeft - 78).toFixed(2)}px`, top: `${eventStubTop + 2}px` }}><ChevronLeft className="size-4" aria-hidden /></button>
+              <button data-event-id={visibleEvent.element.recordId} type="button"
+                onPointerEnter={() => { setActiveTimelineDays(visibleEvent.position); setFocusedEventId(visibleEvent.element.recordId) }}
+                onClick={() => setSelectedId(visibleEvent.element.recordId)}
+                title={visibleEvent.element.data.title}
+                className={cn('absolute z-30 h-8 w-36 -translate-x-1/2 rounded-md border border-border/30 bg-background px-2 text-left transition-colors hover:border-primary', selected?.recordId === visibleEvent.element.recordId && 'border-primary ring-2 ring-primary/20')} style={{ left: `${visibleEventLeft.toFixed(2)}px`, top: `${eventStubTop}px` }}>
+                <span className="block truncate text-sm font-medium text-foreground">{visibleEvent.element.data.title}</span>
               </button>
-            )
-          })}
+              <button type="button" aria-label="Next plot event" title="Next event" onClick={() => moveVisibleEvent(1)} className="absolute z-30 flex size-7 -translate-x-1/2 items-center justify-center rounded text-muted-foreground transition-colors hover:bg-accent hover:text-foreground" style={{ left: `${(visibleEventLeft + 78).toFixed(2)}px`, top: `${eventStubTop + 2}px` }}><ChevronRight className="size-4" aria-hidden /></button>
+              <button type="button" aria-label="Add event after this event" title={`Add event ${smallestUnit.label} after`} onClick={() => onAddEvent(Math.min(span, visibleEvent.position + eventStepDays))} className="absolute z-30 flex size-[23px] -translate-x-1/2 items-center justify-center rounded-full border border-white/30 bg-background text-primary shadow-sm transition-colors hover:border-white hover:bg-accent" style={{ left: `${(visibleEventLeft + 104).toFixed(2)}px`, top: `${eventStubTop + 4}px` }}><Plus className="size-3.5" aria-hidden /></button>
+            </>
+          )}
           {activeMarkerX !== null && (
             <div aria-hidden className="pointer-events-none absolute z-10 h-8 w-px -translate-y-1/2 bg-white shadow-[0_0_2px_rgba(0,0,0,0.65)]" style={{ top: `${rulerY}px`, left: `${activeMarkerX}px` }} />
           )}
+          {timelineIdea && timelineIdeaLeft !== null && <button type="button" aria-label="Review AI event idea" title="Review AI event idea" onClick={() => setOpenTimelineIdeaId(timelineIdea.recordId)} className="absolute z-10 -translate-x-1/2 rounded p-1 text-amber-500 transition-colors hover:bg-amber-500/10" style={{ left: `${timelineIdeaLeft.toFixed(2)}px`, top: `${timelineIdeaTop}px` }}><Lightbulb className="size-5" aria-hidden /></button>}
         </div>
       </div>
       <div className="flex min-h-7 items-center justify-center text-center text-xs tabular-nums text-foreground" aria-label="Timeline hover time">
@@ -1837,6 +2000,13 @@ function PlotEventTimeline({ project, elements, onOpen }: { project: RecordData<
       <div className="mt-2 flex flex-wrap items-center gap-x-4 gap-y-2 text-xs text-muted-foreground" aria-label="Timeline key">
         {visibleUnits.map((timeUnit, index) => <span key={timeUnit.label} className="inline-flex items-center gap-1.5"><i className={cn(index === 0 ? 'h-4' : index === 1 ? 'h-3' : 'h-2', 'w-0.5', timeUnit.color)} aria-hidden />{timeUnit.label}</span>)}
       </div>
+      {timelineIdea && openTimelineIdeaId === timelineIdea.recordId && (
+        <section className="mt-4 rounded-lg border border-amber-500/40 bg-amber-500/5 p-4">
+          <div className="flex items-start justify-between gap-3"><div><p className="text-xs font-medium text-muted-foreground">AI event idea</p><h4 className="mt-1 font-semibold text-foreground">{timelineIdea.data.proposedTitle || 'Suggested event'}</h4></div><IconButton label="Close AI event idea" onClick={() => setOpenTimelineIdeaId(null)}><X aria-hidden /></IconButton></div>
+          <p className="mt-3 text-sm text-muted-foreground">{timelineIdea.data.proposedSummary || timelineIdea.data.proposedValue}</p>
+          <div className="mt-4 flex justify-end gap-2"><Button variant="outline" size="sm" onClick={() => { void removeTimelineSuggestion(timelineIdea.recordId); setOpenTimelineIdeaId(null) }}><X aria-hidden />Reject</Button><Button size="sm" onClick={acceptTimelineIdea}><Check aria-hidden />Accept event</Button></div>
+        </section>
+      )}
       {selected ? (
         <button type="button" onClick={() => onOpen(selected.recordId)} className="mt-4 block w-full rounded-lg border border-border bg-background p-4 text-left transition-colors hover:bg-accent">
           <p className="text-xs font-medium text-muted-foreground">Selected event</p><h4 className="mt-1 font-semibold text-foreground">{selected.data.title}</h4><p className="mt-2 line-clamp-2 text-sm text-muted-foreground">{selected.data.summary || firstFilledField(selected.data) || 'Open this event to add its description.'}</p><p className="mt-3 text-xs font-medium text-primary">Open event card</p>

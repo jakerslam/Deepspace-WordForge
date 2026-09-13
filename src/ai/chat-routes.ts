@@ -124,6 +124,37 @@ export function registerAiChatRoutes(
     }
   })
 
+  app.post('/api/ai/timeline-idea', async (c) => {
+    const auth = await requireAccess(c)
+    if (auth instanceof Response) return auth
+    const authHeader = c.req.header('Authorization') ?? ''
+    const jwt = authHeader.startsWith('Bearer ') ? authHeader.slice(7) : ''
+    if (!jwt) return c.json({ error: 'Unauthorized' }, 401)
+    const body = await c.req.json<{ project?: Record<string, unknown>; startDays?: number; endDays?: number }>()
+    if (!body.project || !Number.isFinite(body.startDays) || !Number.isFinite(body.endDays)) return c.json({ error: 'project and timeline range are required' }, 400)
+    const startDays = body.startDays as number
+    const endDays = body.endDays as number
+    const selectedModel = resolveDeepSpaceAgentModel(undefined, 'application')
+    if (!selectedModel) return c.json({ error: 'No application model is configured' }, 503)
+    const { result } = streamDeepSpaceAgent(c.env, {
+      profile: 'application',
+      modelId: selectedModel.modelId,
+      authToken: jwt,
+      system: 'You are Word Forge. Return only valid JSON with title, description, and positionDays. Suggest one concise plot event. title must be under 60 characters, description under 220 characters, and positionDays must be a number inside the provided range. No markdown or preamble.',
+      messages: [{ role: 'user', content: `Project: ${JSON.stringify(body.project)}\nVisible timeline range in days: ${startDays} to ${endDays}. Suggest one event that fits this specific part of the story.` }],
+      abortSignal: c.req.raw.signal,
+    })
+    const raw = (await result.text).trim().replace(/^```json\s*|```$/g, '').trim()
+    try {
+      const parsed = JSON.parse(raw) as { title?: string; description?: string; positionDays?: number }
+      const position = Math.max(startDays, Math.min(endDays, Number(parsed.positionDays)))
+      if (!Number.isFinite(position)) throw new Error('Invalid position')
+      return c.json({ title: parsed.title || 'Suggested event', description: parsed.description || '', positionDays: position })
+    } catch {
+      return c.json({ error: 'The model returned an unusable timeline idea' }, 422)
+    }
+  })
+
   // Create a new chat row owned by the caller.
   app.post('/api/ai/chats', async (c) => {
     const auth = await requireAccess(c)
