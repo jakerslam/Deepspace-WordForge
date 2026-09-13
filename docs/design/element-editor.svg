@@ -1,0 +1,65 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1440" height="960" viewBox="0 0 1440 960">
+  <style>
+    text { font-family: Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; fill:#13171f; }
+    .muted { fill:#667085; } .blue { fill:#1c4fc2; }
+    .tiny { font-size:11px; font-weight:650; } .small { font-size:12px; }
+    .body { font-size:13px; } .label { font-size:11px; font-weight:700; letter-spacing:.4px; }
+    .h2 { font-size:28px; font-weight:700; } .h3 { font-size:16px; font-weight:650; }
+  </style>
+  <rect width="1440" height="960" fill="#f7f8fa"/>
+  <rect width="1440" height="72" fill="#fff" stroke="#dde1e7"/>
+  <text x="28" y="42" font-size="15" font-weight="750">WORD FORGE</text>
+  <text x="232" y="30" font-size="15" font-weight="650">The Glass Orchard</text>
+  <text x="232" y="50" class="small muted">Science fiction novel</text>
+  <text x="1255" y="39" class="small muted">Saved just now</text>
+  <rect y="72" width="220" height="888" fill="#fff" stroke="#dde1e7"/>
+  <text x="24" y="111" class="label muted">STORY STAGES</text>
+  <text x="24" y="158" class="body">Overview</text><text x="173" y="158" class="tiny" fill="#176b3d">✓</text>
+  <rect x="12" y="174" width="196" height="40" rx="6" fill="#ebf2ff"/><text x="24" y="199" class="body blue" font-weight="650">World</text>
+  <text x="24" y="246" class="body muted">Characters</text><text x="173" y="246" class="tiny muted">LOCKED</text>
+  <text x="24" y="294" class="body muted">Plot</text><text x="173" y="294" class="tiny muted">LOCKED</text>
+  <text x="24" y="342" class="body muted">Chapters</text><text x="173" y="342" class="tiny muted">LOCKED</text>
+  <text x="24" y="420" class="label muted">WORLD COVERAGE</text>
+  <text x="24" y="458" font-size="28" font-weight="750">67%</text>
+  <rect x="24" y="478" width="172" height="6" rx="3" fill="#e2e6ec"/><rect x="24" y="478" width="115" height="6" rx="3" fill="#1c4fc2"/>
+
+  <text x="252" y="116" class="body blue" font-weight="650">‹  World</text>
+  <text x="252" y="162" class="h2">Memory grafting</text>
+  <text x="252" y="191" class="small muted">Technology  ·  Autosaved</text>
+  <rect x="930" y="140" width="178" height="40" rx="6" fill="#e8f6ee" stroke="#68b483"/>
+  <text x="982" y="165" class="body" fill="#176b3d" font-weight="650">✓  Canon</text>
+
+  <text x="252" y="244" class="label muted">OVERVIEW</text>
+  <rect x="252" y="262" width="856" height="112" rx="8" fill="#fff" stroke="#aeb6c3"/>
+  <text x="272" y="296" class="body">Licensed memories can be installed, inherited, or removed under strict state control.</text>
+  <text x="272" y="352" class="tiny muted">AI ACCEPTED</text>
+
+  <text x="252" y="420" class="label muted">CORE RULE</text>
+  <rect x="252" y="438" width="856" height="126" rx="8" fill="#f7faff" stroke="#4a72c9" stroke-width="1.5"/>
+  <text x="272" y="474" class="body">A graft adds knowledge, but it cannot reproduce the original owner’s emotional context.</text>
+  <line x1="779" y1="459" x2="779" y2="483" stroke="#1c4fc2" stroke-width="1.5"/>
+  <text x="272" y="538" class="tiny blue">HUMAN AUTHORED  ·  SAVED</text>
+
+  <text x="252" y="610" class="label muted">COST</text>
+  <rect x="252" y="628" width="856" height="126" rx="8" fill="#fff" stroke="#aeb6c3"/>
+  <text x="272" y="664" class="body muted">Start writing…</text>
+  <text x="272" y="730" class="tiny blue">HUMAN INPUT</text>
+  <rect x="925" y="700" width="163" height="36" rx="6" fill="#fff" stroke="#c8ced8"/>
+  <text x="948" y="723" class="small" font-weight="650">Ask assistant</text>
+
+  <text x="252" y="804" class="label muted">LINKED ELEMENTS</text>
+  <rect x="252" y="822" width="856" height="72" rx="8" fill="#fff" stroke="#d9dee6"/>
+  <text x="272" y="853" class="body blue">Mara Venn  ·  The Keepers  ·  Founder Archive  ·  Chapter 2</text>
+  <text x="272" y="877" class="small muted">Changing accepted canon here may flag linked chapters for review.</text>
+
+  <rect x="1140" y="72" width="300" height="888" fill="#fff" stroke="#dde1e7"/>
+  <text x="1160" y="116" class="h3">Forge assistant</text>
+  <rect x="1160" y="136" width="184" height="24" rx="12" fill="#e9efff"/><text x="1175" y="153" class="tiny blue">CONTEXT: MEMORY GRAFTING</text>
+  <text x="1160" y="200" class="small muted">Typing always remains direct. Ask me only</text>
+  <text x="1160" y="219" class="small muted">when you want a reviewable suggestion.</text>
+  <rect x="1160" y="248" width="260" height="106" rx="8" fill="#f2f4f7"/>
+  <text x="1176" y="278" class="body">The missing cost could create pressure</text>
+  <text x="1176" y="300" class="body">for both the protagonist and the state.</text>
+  <rect x="1160" y="866" width="260" height="68" rx="8" fill="#fff" stroke="#bfc6d1"/>
+  <text x="1176" y="906" class="body muted">Ask about this element…</text>
+</svg>

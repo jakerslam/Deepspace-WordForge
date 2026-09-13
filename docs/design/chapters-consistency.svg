@@ -1,0 +1,95 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1440" height="960" viewBox="0 0 1440 960">
+  <style>
+    text { font-family: Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; fill: #13171f; }
+    .muted { fill: #667085; } .blue { fill: #1c4fc2; }
+    .tiny { font-size: 11px; font-weight: 650; } .small { font-size: 12px; }
+    .body { font-size: 13px; } .label { font-size: 11px; font-weight: 700; letter-spacing: .4px; }
+    .h2 { font-size: 28px; font-weight: 700; } .h3 { font-size: 16px; font-weight: 650; }
+  </style>
+  <rect width="1440" height="960" fill="#f7f8fa"/>
+  <rect width="1440" height="72" fill="#fff" stroke="#dde1e7"/>
+  <text x="28" y="42" font-size="15" font-weight="750">WORD FORGE</text>
+  <text x="232" y="30" font-size="15" font-weight="650">The Glass Orchard</text>
+  <text x="232" y="50" class="small muted">Science fiction novel</text>
+  <text x="1255" y="39" class="small muted">Saved just now</text>
+
+  <rect y="72" width="220" height="888" fill="#fff" stroke="#dde1e7"/>
+  <text x="24" y="111" class="label muted">WORKSPACE</text>
+  <text x="24" y="158" class="body">Overview</text>
+  <text x="24" y="206" class="body">World</text>
+  <text x="24" y="254" class="body">Characters</text>
+  <text x="24" y="302" class="body">Plot</text>
+  <rect x="12" y="318" width="196" height="40" rx="6" fill="#ebf2ff"/>
+  <text x="24" y="343" class="body blue" font-weight="650">Chapters</text>
+  <text x="24" y="420" class="label muted">PREWRITING COVERAGE</text>
+  <text x="24" y="458" font-size="28" font-weight="750">78%</text>
+  <rect x="24" y="478" width="172" height="6" rx="3" fill="#e2e6ec"/>
+  <rect x="24" y="478" width="134" height="6" rx="3" fill="#1c4fc2"/>
+
+  <text x="252" y="126" class="h2">Chapters</text>
+  <text x="252" y="157" class="body muted">Draft from selected canon and see when later changes affect the manuscript.</text>
+  <rect x="948" y="108" width="160" height="42" rx="6" fill="#1c4fc2"/>
+  <text x="978" y="134" class="body" fill="#fff" font-weight="650">New chapter</text>
+
+  <rect x="252" y="196" width="856" height="74" rx="8" fill="#fff7dd" stroke="#dfb943"/>
+  <circle cx="282" cy="233" r="12" fill="#b7791f"/>
+  <text x="278" y="238" font-size="15" fill="#fff" font-weight="750">!</text>
+  <text x="306" y="225" class="body" font-weight="650">One chapter needs review</text>
+  <text x="306" y="247" class="small muted">Memory grafting changed after Chapter 2 was last reviewed.</text>
+  <text x="1005" y="237" class="small" fill="#805500" font-weight="650">Review change →</text>
+
+  <text x="252" y="318" class="h3">Manuscript</text>
+  <rect x="252" y="344" width="856" height="104" rx="8" fill="#fff" stroke="#d9dee6"/>
+  <text x="272" y="373" class="small muted">CHAPTER 1</text>
+  <text x="272" y="402" class="h3">The Orchard Opens</text>
+  <text x="272" y="426" class="small muted">2,184 words  ·  5 linked elements  ·  Reviewed 12 minutes ago</text>
+  <rect x="1000" y="373" width="86" height="25" rx="12" fill="#e7f5ec"/>
+  <text x="1019" y="390" class="tiny" fill="#176b3d">CURRENT</text>
+
+  <rect x="252" y="464" width="856" height="122" rx="8" fill="#fff" stroke="#d0a62d" stroke-width="1.5"/>
+  <rect x="252" y="464" width="5" height="122" rx="3" fill="#c18a17"/>
+  <text x="272" y="493" class="small muted">CHAPTER 2</text>
+  <text x="272" y="522" class="h3">Borrowed Weather</text>
+  <text x="272" y="546" class="small muted">1,740 words  ·  7 linked elements  ·  Generated yesterday</text>
+  <text x="272" y="570" class="small" fill="#8a5a00">Memory grafting changed: “Cost” was accepted as canon.</text>
+  <rect x="957" y="493" width="129" height="25" rx="12" fill="#fff1c2"/>
+  <text x="976" y="510" class="tiny" fill="#805500">NEEDS REVIEW</text>
+
+  <rect x="252" y="602" width="856" height="104" rx="8" fill="#fff" stroke="#d9dee6"/>
+  <text x="272" y="631" class="small muted">CHAPTER 3</text>
+  <text x="272" y="660" class="h3">A Name in the Archive</text>
+  <text x="272" y="684" class="small muted">Outline only  ·  4 selected elements</text>
+  <rect x="1000" y="631" width="86" height="25" rx="12" fill="#eef0f3"/>
+  <text x="1024" y="648" class="tiny muted">DRAFT</text>
+
+  <rect x="1140" y="72" width="300" height="888" fill="#fff" stroke="#dde1e7"/>
+  <text x="1160" y="116" class="h3">Chapter 2</text>
+  <rect x="1160" y="136" width="122" height="24" rx="12" fill="#fff1c2"/>
+  <text x="1174" y="153" class="tiny" fill="#805500">NEEDS REVIEW</text>
+  <text x="1160" y="200" class="label muted">ELEMENTS</text>
+
+  <rect x="1160" y="218" width="260" height="66" rx="7" fill="#fff" stroke="#d9dee6"/>
+  <text x="1174" y="244" class="body" font-weight="650">Memory grafting</text>
+  <text x="1174" y="265" class="small" fill="#8a5a00">Cost changed after generation</text>
+  <circle cx="1395" cy="250" r="6" fill="#c18a17"/>
+
+  <rect x="1160" y="296" width="260" height="58" rx="7" fill="#fff" stroke="#d9dee6"/>
+  <text x="1174" y="322" class="body" font-weight="650">Mara Venn</text>
+  <text x="1174" y="342" class="small muted">Character  ·  Current</text>
+
+  <rect x="1160" y="366" width="260" height="58" rx="7" fill="#fff" stroke="#d9dee6"/>
+  <text x="1174" y="392" class="body" font-weight="650">The Keepers</text>
+  <text x="1174" y="412" class="small muted">Faction  ·  Current</text>
+
+  <rect x="1160" y="436" width="260" height="58" rx="7" fill="#fff" stroke="#d9dee6"/>
+  <text x="1174" y="462" class="body" font-weight="650">The Glass Orchard</text>
+  <text x="1174" y="482" class="small muted">Location  ·  Current</text>
+
+  <line x1="1160" y1="530" x2="1420" y2="530" stroke="#e0e3e8"/>
+  <text x="1160" y="565" class="small muted">Review the changed element against the chapter,</text>
+  <text x="1160" y="584" class="small muted">then mark the chapter current without rewriting it.</text>
+  <rect x="1160" y="616" width="260" height="42" rx="6" fill="#1c4fc2"/>
+  <text x="1207" y="642" class="body" fill="#fff" font-weight="650">Mark reviewed</text>
+  <rect x="1160" y="670" width="260" height="42" rx="6" fill="#fff" stroke="#c8ced8"/>
+  <text x="1214" y="696" class="body" font-weight="650">Revise chapter</text>
+</svg>
