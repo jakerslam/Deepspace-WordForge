@@ -59,6 +59,7 @@ import {
   elementFromTemplate,
 } from '@/word-forge/templates'
 import { OVERVIEW_TROPES, tropesFor, type OverviewTrope } from '@/word-forge/tropes'
+import { useSuggestionPreferences, type TropeSection } from '@/word-forge/preferences'
 
 const SECTION_COPY: Record<ElementSection, string> = {
   world: 'Define the forces, places, and rules that later work depends on.',
@@ -524,7 +525,7 @@ function PhaseHeader({
       disabled={!collapsible}
       onClick={onToggle}
       className={cn(
-        'mb-4 flex w-full items-center justify-between gap-4 rounded-lg border border-border bg-card p-4 text-left transition-colors',
+        'flex w-full items-center justify-between gap-4 p-4 text-left transition-colors',
         collapsible && 'hover:bg-accent',
         !collapsible && 'cursor-default',
       )}
@@ -601,7 +602,7 @@ function OverviewStage({
     <div className="grid gap-5">
       <ReferenceFiles projectId={project.recordId} stage="overview" references={references} />
       <OverviewTropes genre={project.data.genre} onUse={useTrope} />
-      <section>
+      <section className="overflow-hidden rounded-lg border border-border bg-card">
         <PhaseHeader
           title="Stage 1: Overview"
           description={overviewPhaseOneCollapsed ? 'Completed stage collapsed.' : undefined}
@@ -610,13 +611,8 @@ function OverviewStage({
           onToggle={() => setOverviewPhaseOneCollapsed((collapsed) => !collapsed)}
         />
         {!overviewPhaseOneCollapsed && (
-          <div className="rounded-lg border border-border bg-card p-5">
-            <h2 className="text-lg font-semibold text-foreground">Overview</h2>
-            <p className="mt-2 text-sm text-muted-foreground">
-              This is the anchor the rest of the workspace builds from. Keep it short enough
-              that the assistant can use it as context without drowning out the selected card.
-            </p>
-            <div className="mt-6 grid gap-4 md:grid-cols-2">
+          <div className="border-t border-border p-5">
+            <div className="grid gap-4 md:grid-cols-2">
               <Field label="Title"><Input value={overviewDraft.title} onChange={(event) => { const value = event.target.value; setOverviewDraft((draft) => ({ ...draft, title: value })); persistOverview('title', value) }} /></Field>
               <Field label="Genre">
                 <Select value={overviewDraft.genre} onValueChange={(value) => { setOverviewDraft((draft) => ({ ...draft, genre: value as Project['genre'] })); persistOverview('genre', value) }}>
@@ -630,17 +626,15 @@ function OverviewStage({
           </div>
         )}
       </section>
-      <section className={cn('transition-opacity duration-300', !overviewReady && 'pointer-events-none opacity-0')}>
+      <section className={cn('overflow-hidden rounded-lg border border-border bg-card transition-opacity duration-300', !overviewReady && 'pointer-events-none opacity-0')}>
         <PhaseHeader
           title="Stage 2: Lessons & morals"
           collapsible={false}
           collapsed={false}
           onToggle={() => {}}
         />
-        <div className="rounded-lg border border-border bg-card p-5">
-          <h2 className="text-lg font-semibold text-foreground">Lessons & morals</h2>
-          <p className="mt-2 text-sm text-muted-foreground">Add the story's intended meaning once its central description is in place.</p>
-          <div className="mt-4">
+        <div className="border-t border-border p-5">
+          <div>
             <Field label="Lessons & morals"><Textarea value={overviewDraft.lessonsMorals} onChange={(event) => { const value = event.target.value; setOverviewDraft((draft) => ({ ...draft, lessonsMorals: value })); persistOverview('lessonsMorals', value) }} placeholder="What should this story leave the reader thinking about?" className="min-h-20" /></Field>
           </div>
         </div>
@@ -673,6 +667,8 @@ function ElementStage({
   const [openIdeaId, setOpenIdeaId] = useState<string | null>(null)
   const [timelineCollapsed, setTimelineCollapsed] = useState(false)
   const requestedIdeaIds = useRef(new Set<string>())
+  const { enabled } = useSuggestionPreferences()
+  const aiEnabled = enabled('ai')
   const completionTriggered = useRef(false)
   const { records: stageSuggestions } = useQuery<Suggestion>('suggestions', {
     where: { projectId: project.recordId },
@@ -684,7 +680,8 @@ function ElementStage({
   const setupReady = stage === 'plot' ? Boolean(project.data.timelineSpanDays) : true
 
   useEffect(() => {
-    if (!setupReady) return
+    if (!setupReady || !aiEnabled) return
+    const controller = new AbortController()
     if (stageSuggestions.some((suggestion) => suggestion.data.suggestionType === 'card' && suggestion.data.status === 'pending')) return
     const candidate = elements.find((item) => {
       if (elementCoverage(item.data) === 100 || requestedIdeaIds.current.has(item.recordId)) return false
@@ -693,8 +690,11 @@ function ElementStage({
     if (!candidate) return
     requestedIdeaIds.current.add(candidate.recordId)
     const hasAcceptedIdea = stageSuggestions.some((suggestion) => suggestion.data.elementId === candidate.recordId && suggestion.data.status === 'accepted')
-    void createStoryIdea(project, candidate, createSuggestion, hasAcceptedIdea).finally(() => requestedIdeaIds.current.delete(candidate.recordId))
-  }, [createSuggestion, elements, project, setupReady, stageSuggestions])
+    void createStoryIdea(project, candidate, createSuggestion, hasAcceptedIdea, controller.signal)
+      .catch(() => {})
+      .finally(() => requestedIdeaIds.current.delete(candidate.recordId))
+    return () => controller.abort()
+  }, [aiEnabled, createSuggestion, elements, project, setupReady, stageSuggestions])
 
   useEffect(() => {
     if (stage === 'plot' && setupReady) setTimelineCollapsed(true)
@@ -824,7 +824,7 @@ function ElementStage({
     <div className="grid min-w-0 max-w-full gap-5 overflow-x-hidden">
       <ReferenceFiles projectId={project.recordId} stage={stage} references={references} />
       {stage === 'plot' && (
-        <section>
+        <section className="min-w-0 overflow-hidden rounded-lg border border-border bg-card">
           <PhaseHeader
             title="Stage 1: Timespan"
             description={timelineCollapsed ? 'Completed stage collapsed.' : undefined}
@@ -832,11 +832,11 @@ function ElementStage({
             collapsed={timelineCollapsed}
             onToggle={() => setTimelineCollapsed((collapsed) => !collapsed)}
           />
-          {!timelineCollapsed && <PlotTimeline project={project} />}
+          {!timelineCollapsed && <div className="border-t border-border [&>section]:rounded-none [&>section]:border-0"><PlotTimeline project={project} /></div>}
         </section>
       )}
-      <section className={cn('transition-opacity duration-300', stage === 'plot' && !setupReady && 'pointer-events-none opacity-0')}>
-        <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
+      <section className={cn('min-w-0 transition-opacity duration-300', stage === 'plot' && 'rounded-lg border border-border bg-card p-4', stage === 'plot' && !setupReady && 'pointer-events-none opacity-0')}>
+        <div className={cn('flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between', stage === 'plot' && '-mx-4 -mt-4 mb-4 border-b border-border p-4')}>
           <div>
             <h2 className="text-lg font-semibold text-foreground">{stage === 'plot' ? 'Stage 2: Plot elements' : STAGE_LABELS[stage]}</h2>
             <p className="mt-1 text-sm text-muted-foreground">{SECTION_COPY[stage]}</p>
@@ -850,7 +850,7 @@ function ElementStage({
         {setupReady && <TropeSuggestions stage={stage} genre={project.data.genre} hasWrittenContent={elements.some((element) => isElementComplete(element.data))} onUse={useTrope} />}
 
         {stage === 'plot' ? <PlotEventTimeline project={project} elements={elements} onOpen={onOpen} /> : <div className={cn('mt-5 grid gap-3 transition-opacity sm:grid-cols-2 xl:grid-cols-3', !setupReady && 'pointer-events-none opacity-0')}>
-          {cardIdeas.map((idea) => (
+          {aiEnabled && cardIdeas.map((idea) => (
             <article key={idea.recordId} className="rounded-lg border border-dashed border-primary/50 bg-primary/5 p-4">
               <div className="flex items-start justify-between gap-3">
                 <h3 className="font-semibold text-foreground">{idea.data.proposedTitle || 'Card idea'}</h3>
@@ -880,7 +880,7 @@ function ElementStage({
                   <h3 className="mt-1 text-base font-semibold text-foreground">{element.data.title}</h3>
                 </div>
                 <div className="flex items-center gap-2">
-                  {idea && <div className="relative">
+                  {aiEnabled && idea && <div className="relative">
                     <button type="button" aria-label="View AI idea" title="View AI idea" onClick={(event) => { event.stopPropagation(); setOpenIdeaId(openIdeaId === element.recordId ? null : element.recordId) }} className="flex size-7 items-center justify-center rounded-md text-amber-500 hover:bg-amber-500/10"><Lightbulb className="size-4" aria-hidden /></button>
                     {openIdeaId === element.recordId && <div className="absolute right-0 top-9 z-10 w-64 rounded-md border border-border bg-popover p-3 text-xs text-popover-foreground shadow-md">
                       <button type="button" aria-label="Close idea" title="Close idea" onClick={() => setOpenIdeaId(null)} className="absolute right-1 top-1 text-muted-foreground hover:text-foreground"><X className="size-3.5" aria-hidden /></button>
@@ -1628,6 +1628,7 @@ function PlotEventTimeline({ project, elements, onOpen }: { project: RecordData<
   const [zoomLevel, setZoomLevel] = useState(0)
   const [timelineViewport, setTimelineViewport] = useState({ left: 0, width: 900 })
   const [hoverX, setHoverX] = useState<number | null>(null)
+  const [activeTimelineDays, setActiveTimelineDays] = useState<number | null>(null)
   const readPosition = (element: RecordData<StoryElement>) => {
     const raw = element.data.fields.timelinePosition?.trim() ?? ''
     if (!raw) return null
@@ -1660,7 +1661,7 @@ function PlotEventTimeline({ project, elements, onOpen }: { project: RecordData<
   const hoverDays = hoverTrackX === null || hoverTrackX < TIMELINE_EDGE_PADDING_PX || hoverTrackX > trackWidthPixels - TIMELINE_EDGE_PADDING_PX
     ? null
     : ((hoverTrackX - TIMELINE_EDGE_PADDING_PX) / measuredTimelineWidthPixels) * span
-  let remainingHoverUnits = hoverDays === null ? 0 : Math.min(Math.round(hoverDays / smallestUnit.days), Math.floor(span / smallestUnit.days))
+  let remainingHoverUnits = activeTimelineDays === null ? 0 : Math.min(Math.round(activeTimelineDays / smallestUnit.days), Math.floor(span / smallestUnit.days))
   const hoverTimeLabel = visibleUnits.map((unit) => {
     const unitsPerMeasure = smallestUnitsPer(TIME_UNITS.indexOf(unit), smallestUnitIndex)
     const count = Math.floor(remainingHoverUnits / unitsPerMeasure)
@@ -1670,6 +1671,7 @@ function PlotEventTimeline({ project, elements, onOpen }: { project: RecordData<
   }).join(', ')
   const timelineLeft = (days: number) => TIMELINE_EDGE_PADDING_PX + (days / span) * measuredTimelineWidthPixels
   const timelineLeftStyle = (days: number) => `${timelineLeft(days).toFixed(2)}px`
+  const activeMarkerX = activeTimelineDays === null ? null : timelineLeft(activeTimelineDays)
   const visibleTickStartPx = Math.max(0, timelineViewport.left - timelineViewport.width)
   const visibleTickEndPx = Math.min(trackWidthPixels, timelineViewport.left + timelineViewport.width * 2)
   const visibleStartCount = Math.max(0, Math.floor((visibleTickStartPx - TIMELINE_EDGE_PADDING_PX) / MIN_TIMELINE_TICK_SPACING_PX))
@@ -1686,6 +1688,7 @@ function PlotEventTimeline({ project, elements, onOpen }: { project: RecordData<
   if (visibleStartCount === 0) tickByCount.set(0, { unit: topUnit, level: 0 })
   if (visibleEndCount === totalSmallestUnits) tickByCount.set(totalSmallestUnits, { unit: topUnit, level: 0 })
   const ticks = [...tickByCount.entries()].sort(([a], [b]) => a - b).map(([count, tick]) => ({
+    count,
     days: (count / totalSmallestUnits) * span,
     unit: tick.unit,
     level: tick.level,
@@ -1756,18 +1759,21 @@ function PlotEventTimeline({ project, elements, onOpen }: { project: RecordData<
   const positions = ordered.map((element, index) => {
     const raw = readPosition(element)
     const position = raw !== null ? Math.max(0, Math.min(span, raw)) : ordered.length < 2 ? 0 : (index / (ordered.length - 1)) * span
-    const samePositionIndex = ordered.slice(0, index).filter((candidate) => {
-      const candidatePosition = readPosition(candidate)
-      return candidatePosition !== null && Math.abs(candidatePosition - position) < 0.01
-    }).length
-    return { element, position, samePositionIndex }
+    return { element, position }
   })
+  // Leave room for event-count badges above the ruler without clipping them.
+  const rulerY = 36
+  const nearestDistance = activeTimelineDays === null ? Infinity : Math.min(...positions.map(({ position }) => Math.abs(position - activeTimelineDays)))
+  const nearbyPositions = nearestDistance <= smallestUnit.days
+    ? positions.filter(({ position }) => Math.abs(Math.abs(position - (activeTimelineDays ?? 0)) - nearestDistance) < 0.001)
+    : []
+  const timelineHeight = Math.max(96, rulerY + 24 + nearbyPositions.length * 36)
 
   return (
     <section className="mt-5 w-full min-w-0 max-w-full overflow-hidden rounded-lg border border-border bg-card p-4">
-      <div className="flex items-start justify-between gap-3">
-        <div><p className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">Stage 2</p><h3 className="mt-1 text-base font-semibold text-foreground">Event timeline</h3><p className="mt-1 text-sm text-muted-foreground">Place events along the story span to keep cause, consequence, and continuity visible.</p></div>
-        <div className="flex items-center gap-1">
+      <div className="grid grid-cols-[1fr_auto_1fr] items-center gap-3">
+        <h3 className="col-start-2 text-base font-semibold text-foreground">Event timeline</h3>
+        <div className="col-start-3 flex items-center justify-self-end gap-1">
           <Button variant="ghost" size="sm" onClick={() => setZoomLevel((level) => Math.max(-1, level - 1))} disabled={zoomLevel <= -1} aria-label="Zoom out timeline" title="Zoom out timeline"><ZoomOut aria-hidden /></Button>
           <Button variant="ghost" size="sm" onClick={() => setZoomLevel((level) => Math.min(Math.max(0, topUnitIndex - 2), level + 1))} disabled={zoomLevel >= Math.max(0, topUnitIndex - 2)} aria-label="Zoom in timeline" title="Zoom in timeline"><ZoomIn aria-hidden /></Button>
         </div>
@@ -1776,34 +1782,57 @@ function PlotEventTimeline({ project, elements, onOpen }: { project: RecordData<
         onPointerMove={(event) => {
           if (event.pointerType === 'touch') return
           const viewport = event.currentTarget
-          setHoverX(event.clientX - viewport.getBoundingClientRect().left - viewport.clientLeft)
+          const bounds = viewport.getBoundingClientRect()
+          const y = event.clientY - bounds.top
+          const trackX = event.clientX - bounds.left - viewport.clientLeft
+          if (Math.abs(y - rulerY) <= 16) {
+            setHoverX(trackX)
+            const absoluteX = trackX + viewport.scrollLeft
+            setActiveTimelineDays(absoluteX < TIMELINE_EDGE_PADDING_PX || absoluteX > trackWidthPixels - TIMELINE_EDGE_PADDING_PX
+              ? null
+              : ((absoluteX - TIMELINE_EDGE_PADDING_PX) / measuredTimelineWidthPixels) * span)
+          } else {
+            setHoverX(null)
+          }
         }}
         onPointerLeave={() => setHoverX(null)}
-        onPointerCancel={() => setHoverX(null)}
+        onPointerCancel={() => { setHoverX(null); setActiveTimelineDays(null) }}
         className="mt-5 w-0 min-w-full max-w-full overflow-x-auto pb-3">
-        <div className="relative h-56" style={{ width: `${trackWidthPixels}px` }}>
-          <div className="absolute top-1/2 h-px bg-border" style={{ left: `${TIMELINE_EDGE_PADDING_PX}px`, width: `${measuredTimelineWidthPixels}px` }} />
-          <div className="absolute top-[calc(50%+5px)] h-px bg-border" style={{ left: `${TIMELINE_EDGE_PADDING_PX}px`, width: `${measuredTimelineWidthPixels}px` }} />
+        <div className="relative" style={{ width: `${trackWidthPixels}px`, height: `${timelineHeight}px` }}>
+          <div className="absolute h-px bg-border" style={{ top: `${rulerY}px`, left: `${TIMELINE_EDGE_PADDING_PX}px`, width: `${measuredTimelineWidthPixels}px` }} />
+          <div className="absolute h-px bg-border" style={{ top: `${rulerY + 5}px`, left: `${TIMELINE_EDGE_PADDING_PX}px`, width: `${measuredTimelineWidthPixels}px` }} />
           {ticks.map((tick, index) => {
-            return <span key={`${tick.days}-${index}`} className={cn('absolute top-1/2 w-px -translate-y-1/2', tick.unit.color, tick.level === 0 ? 'h-8' : tick.level === 1 ? 'h-5' : 'h-3')} style={{ left: timelineLeftStyle(tick.days) }} aria-hidden />
-          })}
-          {positions.map(({ element, position, samePositionIndex }, index) => {
-            const left = span ? timelineLeft(position) : TIMELINE_EDGE_PADDING_PX + (index / Math.max(1, positions.length - 1)) * measuredTimelineWidthPixels
-            const above = index % 2 === 0
+            const isEndpoint = tick.count === 0 || tick.count === totalSmallestUnits
+            const isCountMarker = isEndpoint || (tick.unit.label === smallestUnit.label && tick.count % 3 === 0)
+            const eventCount = isCountMarker
+              ? positions.filter(({ position }) => Math.abs(position - tick.days) <= smallestUnit.days).length
+              : 0
             return (
-              <button key={element.recordId} data-event-id={element.recordId} type="button" onClick={() => setSelectedId(element.recordId)} className={cn('absolute w-36 -translate-x-1/2 rounded-md border bg-background p-2 text-left shadow-sm transition-colors hover:border-primary', selected?.recordId === element.recordId && 'border-primary ring-2 ring-primary/20')} style={{ left: `${left.toFixed(2)}px`, top: above ? `${30 - samePositionIndex * 48}px` : `${120 + samePositionIndex * 48}px` }}>
+              <span key={`${tick.days}-${index}`} className={cn('absolute w-px -translate-y-1/2', tick.unit.color, tick.level === 0 ? 'h-8' : tick.level === 1 ? 'h-5' : 'h-3')} style={{ top: `${rulerY}px`, left: timelineLeftStyle(tick.days) }} aria-hidden>
+                {eventCount > 0 && <i className="absolute bottom-full left-1/2 flex h-4 min-w-4 -translate-x-1/2 -translate-y-1 items-center justify-center rounded-full bg-red-500 px-1 text-[9px] font-semibold not-italic leading-4 text-white">{eventCount}</i>}
+              </span>
+            )
+          })}
+          {nearbyPositions.map(({ element, position }, lane) => {
+            const index = positions.findIndex((item) => item.element.recordId === element.recordId)
+            const left = span ? timelineLeft(position) : TIMELINE_EDGE_PADDING_PX + (index / Math.max(1, positions.length - 1)) * measuredTimelineWidthPixels
+            return (
+              <button key={element.recordId} data-event-id={element.recordId} type="button"
+                onPointerEnter={() => setActiveTimelineDays(position)}
+                onClick={() => setSelectedId(element.recordId)}
+                title={element.data.title}
+                className={cn('absolute h-8 w-36 -translate-x-1/2 rounded-md border bg-background px-2 text-left transition-colors hover:border-primary', selected?.recordId === element.recordId && 'border-primary ring-2 ring-primary/20')} style={{ left: `${left.toFixed(2)}px`, top: `${rulerY + 24 + lane * 36}px` }}>
                 <span className="block truncate text-sm font-medium text-foreground">{element.data.title}</span>
-                <span className="mt-1 block text-[11px] text-muted-foreground">{formatEventTime(position, topUnit)}</span>
               </button>
             )
           })}
-          {hoverDays !== null && hoverTrackX !== null && (
-            <div aria-hidden className="pointer-events-none absolute top-1/2 z-10 h-8 w-px -translate-y-1/2 bg-white shadow-[0_0_2px_rgba(0,0,0,0.65)]" style={{ left: `${hoverTrackX}px` }} />
+          {activeMarkerX !== null && (
+            <div aria-hidden className="pointer-events-none absolute z-10 h-8 w-px -translate-y-1/2 bg-white shadow-[0_0_2px_rgba(0,0,0,0.65)]" style={{ top: `${rulerY}px`, left: `${activeMarkerX}px` }} />
           )}
         </div>
       </div>
       <div className="flex min-h-7 items-center justify-center text-center text-xs tabular-nums text-foreground" aria-label="Timeline hover time">
-        {hoverDays !== null ? hoverTimeLabel : '\u00a0'}
+        {activeTimelineDays !== null ? hoverTimeLabel : '\u00a0'}
       </div>
       <div className="mt-2 flex flex-wrap items-center gap-x-4 gap-y-2 text-xs text-muted-foreground" aria-label="Timeline key">
         {visibleUnits.map((timeUnit, index) => <span key={timeUnit.label} className="inline-flex items-center gap-1.5"><i className={cn(index === 0 ? 'h-4' : index === 1 ? 'h-3' : 'h-2', 'w-0.5', timeUnit.color)} aria-hidden />{timeUnit.label}</span>)}
@@ -1834,44 +1863,63 @@ function TropeSuggestions({
   hasWrittenContent: boolean
   onUse: (trope: Trope) => void
 }) {
-  const tropes = useMemo(() => {
-    const candidates = tropesFor(stage, genre)
-    return [...candidates].sort(() => Math.random() - 0.5).slice(0, 3)
-  }, [genre, stage])
-  if (hasWrittenContent || tropes.length === 0) return null
-
-  return (
-    <section className="rounded-lg border border-border bg-muted/20 p-4">
-      <div className="flex items-center gap-2">
-        <Lightbulb className="size-4 text-amber-500" aria-hidden />
-        <h2 className="text-sm font-semibold text-foreground">Tropes</h2>
-      </div>
-      <div className="mt-3 grid gap-2 md:grid-cols-3">
-        {tropes.map((trope) => (
-          <button key={trope.name} type="button" onClick={() => { void onUse(trope) }} className="rounded-md border border-border bg-background p-3 text-left transition-colors hover:bg-accent">
-            <p className="text-sm font-medium text-foreground">{trope.name}</p>
-            <p className="mt-1 text-xs leading-5 text-muted-foreground">{trope.description}</p>
-            <p className="mt-2 text-xs font-medium text-primary">Create Sketch card</p>
-          </button>
-        ))}
-      </div>
-    </section>
-  )
+  if (hasWrittenContent) return null
+  return <TropeRow key={`${stage}-${genre}`} section={stage} candidates={tropesFor(stage, genre)} onUse={onUse} />
 }
 
 function OverviewTropes({ genre, onUse }: { genre: Genre; onUse: (trope: OverviewTrope) => void }) {
-  const tropes = OVERVIEW_TROPES.filter((trope) => trope.genres.includes(genre))
+  return <TropeRow key={genre} section="overview" candidates={OVERVIEW_TROPES.filter((trope) => trope.genres.includes(genre))} onUse={onUse} />
+}
+
+function sampleTropes<T extends OverviewTrope>(candidates: T[], previous: T[] = []): T[] {
+  const previousNames = new Set(previous.map((trope) => trope.name))
+  const pool = [...candidates]
+  for (let index = pool.length - 1; index > 0; index--) {
+    const other = Math.floor(Math.random() * (index + 1))
+    ;[pool[index], pool[other]] = [pool[other], pool[index]]
+  }
+  return [...pool.filter((trope) => !previousNames.has(trope.name)), ...pool.filter((trope) => previousNames.has(trope.name))]
+}
+
+const TROPE_CARD_SIZE = 150
+const TROPE_CARD_GAP = 12
+
+function TropeRow<T extends OverviewTrope>({ section, candidates, onUse }: { section: TropeSection; candidates: T[]; onUse: (trope: T) => void }) {
+  const [batch, setBatch] = useState(() => ({ tropes: sampleTropes(candidates), revision: 0 }))
+  const rowRef = useRef<HTMLDivElement>(null)
+  const [rowCapacity, setRowCapacity] = useState(1)
+  const { enabled, setEnabled } = useSuggestionPreferences()
+  const visible = batch.tropes.length > 0 && enabled('tropes') && enabled(section)
+  useEffect(() => {
+    const row = rowRef.current
+    if (!visible || !row) return
+    const measure = () => setRowCapacity(Math.max(1, Math.floor((row.clientWidth + TROPE_CARD_GAP) / (TROPE_CARD_SIZE + TROPE_CARD_GAP))))
+    measure()
+    const observer = new ResizeObserver(measure)
+    observer.observe(row)
+    return () => observer.disconnect()
+  }, [visible])
+  if (!visible) return null
   return (
-    <section className="rounded-lg border border-border bg-muted/20 p-4">
+    <section className="min-w-0 rounded-lg border border-border p-4">
       <div className="flex items-center gap-2">
         <Lightbulb className="size-4 text-amber-500" aria-hidden />
         <h2 className="text-sm font-semibold text-foreground">Tropes</h2>
+        <div className="ml-auto flex items-center gap-1">
+          <Button variant="ghost" size="sm" aria-label="Refresh tropes" title="Refresh tropes"
+            onClick={() => setBatch((previous) => ({ tropes: sampleTropes(candidates, previous.tropes.slice(0, rowCapacity)), revision: previous.revision + 1 }))}>
+            <RefreshCw aria-hidden />
+          </Button>
+          <Button variant="ghost" size="sm" aria-label="Close tropes" title="Close tropes" onClick={() => setEnabled(section, false)}><X aria-hidden /></Button>
+        </div>
       </div>
-      <div className="mt-3 flex flex-wrap gap-2">
-        {tropes.map((trope) => (
-          <button key={trope.name} type="button" onClick={() => { void onUse(trope) }} className="rounded-md border border-border bg-background px-3 py-2 text-left transition-colors hover:bg-accent">
-            <span className="block text-sm font-medium text-foreground">{trope.name}</span>
-            <span className="mt-1 block text-xs text-muted-foreground">{trope.description}</span>
+      <div ref={rowRef} className="mt-3 grid min-w-0" style={{ gridTemplateColumns: `repeat(${Math.min(rowCapacity, batch.tropes.length)}, minmax(0, ${TROPE_CARD_SIZE}px))`, gap: TROPE_CARD_GAP }}>
+        {batch.tropes.slice(0, rowCapacity).map((trope, index) => (
+          <button key={`${batch.revision}-${trope.name}`} type="button" onClick={() => { void onUse(trope) }}
+            style={{ animationDelay: `${index * 120}ms` }}
+            className="trope-fade-in aspect-square min-w-0 overflow-y-auto rounded-md border border-border bg-background p-2 text-left align-top transition-colors hover:bg-accent">
+            <span className="block break-words text-xs font-medium leading-4 text-foreground">{trope.name}</span>
+            <span className="mt-1 block break-words text-xs leading-4 text-muted-foreground">{trope.description}</span>
           </button>
         ))}
       </div>
@@ -1889,7 +1937,8 @@ function ReferenceFiles({
   references: RecordData<Reference>[]
 }) {
   const { upload, readFile, deleteFile, isUploading } = useR2Files()
-  const { create, remove } = useMutations<Reference>('references')
+  const { create, remove, ready } = useMutations<Reference>('references')
+  const [uploadProgress, setUploadProgress] = useState<{ current: number; total: number } | null>(null)
   const { success, error } = useToast()
   const [preview, setPreview] = useState<RecordData<Reference> | null>(null)
   const [previewText, setPreviewText] = useState('')
@@ -1898,34 +1947,41 @@ function ReferenceFiles({
   const stageReferences = references.filter((reference) => reference.data.stage === stage)
 
   async function uploadReference(event: React.ChangeEvent<HTMLInputElement>) {
-    const file = event.target.files?.[0]
+    const files = Array.from(event.target.files ?? [])
     event.target.value = ''
-    if (!file) return
-    const isText = file.type === 'text/plain' || file.type === 'text/markdown' || /\.(txt|md)$/i.test(file.name)
-    if (!isText) {
-      error('Unsupported reference file', 'Upload a .txt or .md file so Word Forge can preview it.')
-      return
+    if (!files.length || uploadProgress || !ready) return
+    let added = 0
+    const failures: string[] = []
+    try {
+      for (const [index, file] of files.entries()) {
+        setUploadProgress({ current: index + 1, total: files.length })
+        const isText = file.type === 'text/plain' || file.type === 'text/markdown' || /\.(txt|md)$/i.test(file.name)
+        if (!isText || file.size > 2_000_000) {
+          failures.push(`${file.name}: ${!isText ? 'use .txt or .md' : 'exceeds 2 MB'}`)
+          continue
+        }
+        try {
+          const result = await upload(file, file.name)
+          if (!result.success || !result.key) throw new Error(result.error || 'Upload failed')
+          await create({
+            projectId,
+            stage,
+            fileKey: result.key,
+            fileName: file.name,
+            mimeType: file.type || (file.name.toLowerCase().endsWith('.md') ? 'text/markdown' : 'text/plain'),
+            size: file.size,
+            status: 'ready',
+          })
+          added++
+        } catch {
+          failures.push(`${file.name}: could not be added`)
+        }
+      }
+    } finally {
+      setUploadProgress(null)
     }
-    if (file.size > 2_000_000) {
-      error('Reference file is too large', 'Keep text references under 2 MB for a fast preview.')
-      return
-    }
-
-    const result = await upload(file, file.name)
-    if (!result.success || !result.key) {
-      error('Upload failed', result.error || 'The file could not be stored.')
-      return
-    }
-    await create({
-      projectId,
-      stage,
-      fileKey: result.key,
-      fileName: file.name,
-      mimeType: file.type || (file.name.toLowerCase().endsWith('.md') ? 'text/markdown' : 'text/plain'),
-      size: file.size,
-      status: 'ready',
-    })
-    success('Reference added', `${file.name} is ready to preview.`)
+    if (added) success('References added', `${added} ${added === 1 ? 'file is' : 'files are'} ready to preview.`)
+    if (failures.length) error('Some files were not added', failures.join('\n'))
   }
 
   async function openPreview(reference: RecordData<Reference>) {
@@ -1966,8 +2022,8 @@ function ReferenceFiles({
           </div>
           <label className="inline-flex cursor-pointer items-center justify-center gap-2 rounded-md border border-border px-3 py-2 text-sm font-medium text-foreground transition-colors hover:bg-accent">
             <Paperclip className="size-4" aria-hidden />
-            {isUploading ? 'Uploading...' : 'Add'}
-            <input type="file" accept=".txt,.md,text/plain,text/markdown" className="sr-only" disabled={isUploading} onChange={uploadReference} />
+            {uploadProgress ? `Uploading ${uploadProgress.current}/${uploadProgress.total}...` : 'Add'}
+            <input type="file" multiple accept=".txt,.md,text/plain,text/markdown" className="sr-only" disabled={!ready || isUploading || Boolean(uploadProgress)} onChange={uploadReference} />
           </label>
         </div>
         {stageReferences.length > 0 && (
@@ -2112,9 +2168,11 @@ async function createStoryIdea(
   element: RecordData<StoryElement>,
   createSuggestion: (data: Omit<Suggestion, 'projectId'> & { projectId: string }) => Promise<string>,
   preferNewField = false,
+  signal?: AbortSignal,
 ) {
   const token = await getAuthToken()
   const response = await fetch('/api/ai/story-idea', {
+    signal,
     method: 'POST',
     headers: { 'Content-Type': 'application/json', ...(token ? { Authorization: `Bearer ${token}` } : {}) },
     body: JSON.stringify({
@@ -2125,6 +2183,7 @@ async function createStoryIdea(
   })
   if (!response.ok) return
   const data = await response.json() as { fieldKey?: string; suggestion?: string; suggestionType?: 'field' | 'card'; proposedTitle?: string; proposedSummary?: string }
+  if (signal?.aborted) return
   if (!data.fieldKey || !data.suggestion) return
   await createSuggestion({
     projectId: project.recordId,
