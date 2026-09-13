@@ -892,7 +892,7 @@ function ElementStage({
 
         {setupReady && <TropeSuggestions stage={stage} genre={project.data.genre} hasWrittenContent={elements.some((element) => isElementComplete(element.data))} onUse={useTrope} />}
 
-        {stage === 'plot' ? <PlotEventTimeline project={project} elements={elements} onOpen={onOpen} onAddEvent={addTimelineEvent} onAddSketchEvent={addSketchEvent} aiEnabled={aiEnabled} /> : <div className={cn('mt-5 grid gap-3 transition-opacity sm:grid-cols-2 xl:grid-cols-3', !setupReady && 'pointer-events-none opacity-0')}>
+        {stage === 'plot' ? <PlotEventTimeline project={project} elements={elements} references={references} onOpen={onOpen} onAddEvent={addTimelineEvent} onAddSketchEvent={addSketchEvent} aiEnabled={aiEnabled} /> : <div className={cn('mt-5 grid gap-3 transition-opacity sm:grid-cols-2 xl:grid-cols-3', !setupReady && 'pointer-events-none opacity-0')}>
           {aiEnabled && cardIdeas.map((idea) => (
             <article key={idea.recordId} className="rounded-lg border border-dashed border-primary/50 bg-primary/5 p-4">
               <div className="flex items-start justify-between gap-3">
@@ -1715,7 +1715,11 @@ function formatTimelineTimestamp(days: number, units: typeof TIME_UNITS) {
   return timestamp || `0 ${units.at(-1)?.label ?? 'days'}`
 }
 
-function PlotEventTimeline({ project, elements, onOpen, onAddEvent, onAddSketchEvent, aiEnabled }: { project: RecordData<Project>; elements: RecordData<StoryElement>[]; onOpen: (id: string) => void; onAddEvent: (days: number, detail?: { title: string; summary: string }) => void; onAddSketchEvent: () => void; aiEnabled: boolean }) {
+function normalizeIdeaTitle(value?: string) {
+  return (value ?? '').toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim()
+}
+
+function PlotEventTimeline({ project, elements, references, onOpen, onAddEvent, onAddSketchEvent, aiEnabled }: { project: RecordData<Project>; elements: RecordData<StoryElement>[]; references: RecordData<Reference>[]; onOpen: (id: string) => void; onAddEvent: (days: number, detail?: { title: string; summary: string }) => void; onAddSketchEvent: () => void; aiEnabled: boolean }) {
   const trackRef = useRef<HTMLDivElement>(null)
   const [view, setView] = useState<'timeline' | 'events'>('timeline')
   const [selectedId, setSelectedId] = useState<string | null>(null)
@@ -1728,7 +1732,7 @@ function PlotEventTimeline({ project, elements, onOpen, onAddEvent, onAddSketchE
   const [openTimelineIdeaId, setOpenTimelineIdeaId] = useState<string | null>(null)
   const requestedTimelineRanges = useRef(new Set<string>())
   const { records: timelineSuggestions } = useQuery<Suggestion>('suggestions', { where: { projectId: project.recordId }, orderBy: 'createdAt', orderDir: 'desc' })
-  const { create: createTimelineSuggestion, remove: removeTimelineSuggestion } = useMutations<Suggestion>('suggestions')
+  const { create: createTimelineSuggestion, put: putTimelineSuggestion } = useMutations<Suggestion>('suggestions')
   const readPosition = (element: RecordData<StoryElement>) => {
     const raw = element.data.fields.timelinePosition?.trim() ?? ''
     if (!raw) return null
@@ -1759,7 +1763,9 @@ function PlotEventTimeline({ project, elements, onOpen, onAddEvent, onAddSketchE
   const trackWidthPixels = measuredTimelineWidthPixels + TIMELINE_EDGE_PADDING_PX * 2
   const viewportStartDays = Math.max(0, ((timelineViewport.left - TIMELINE_EDGE_PADDING_PX) / measuredTimelineWidthPixels) * span)
   const viewportEndDays = Math.min(span, ((timelineViewport.left + timelineViewport.width - TIMELINE_EDGE_PADDING_PX) / measuredTimelineWidthPixels) * span)
-  const pendingTimelineIdeas = timelineSuggestions.filter((suggestion) => suggestion.data.status === 'pending' && suggestion.data.fieldKey === '__timeline__')
+  const plotTimelineSuggestions = useMemo(() => timelineSuggestions.filter((suggestion) => suggestion.data.fieldKey === '__timeline__'), [timelineSuggestions])
+  const pendingTimelineIdeas = useMemo(() => plotTimelineSuggestions.filter((suggestion) => suggestion.data.status === 'pending'), [plotTimelineSuggestions])
+  const visibleTimelineIdeas = pendingTimelineIdeas.slice(0, 3)
   const hoverTrackX = hoverX === null ? null : hoverX + timelineViewport.left
   const hoverDays = hoverTrackX === null || hoverTrackX < TIMELINE_EDGE_PADDING_PX || hoverTrackX > trackWidthPixels - TIMELINE_EDGE_PADDING_PX
     ? null
@@ -1801,8 +1807,8 @@ function PlotEventTimeline({ project, elements, onOpen, onAddEvent, onAddSketchE
       : hoverX > timelineViewport.width * 0.95 ? 1 : 0
 
   useEffect(() => {
-    if (!aiEnabled || pendingTimelineIdeas.length || viewportEndDays <= viewportStartDays) return
-    const rangeKey = `${Math.round(viewportStartDays / smallestUnit.days)}:${Math.round(viewportEndDays / smallestUnit.days)}:${zoomLevel}`
+    if (!aiEnabled || pendingTimelineIdeas.length >= 3 || viewportEndDays <= viewportStartDays) return
+    const rangeKey = `${Math.round(viewportStartDays / smallestUnit.days)}:${Math.round(viewportEndDays / smallestUnit.days)}:${zoomLevel}:${pendingTimelineIdeas.length}:${plotTimelineSuggestions.length}`
     if (requestedTimelineRanges.current.has(rangeKey)) return
     requestedTimelineRanges.current.add(rangeKey)
     const controller = new AbortController()
@@ -1813,32 +1819,56 @@ function PlotEventTimeline({ project, elements, onOpen, onAddEvent, onAddSketchE
           method: 'POST',
           headers: { 'Content-Type': 'application/json', ...(token ? { Authorization: `Bearer ${token}` } : {}) },
           signal: controller.signal,
-          body: JSON.stringify({ project: { title: project.data.title, genre: project.data.genre, premise: project.data.premise }, startDays: viewportStartDays, endDays: viewportEndDays }),
+          body: JSON.stringify({
+            project: { title: project.data.title, genre: project.data.genre, premise: project.data.premise, lessonsMorals: project.data.lessonsMorals },
+            startDays: viewportStartDays,
+            endDays: viewportEndDays,
+            count: 3 - pendingTimelineIdeas.length,
+            existingEvents: elements.map((element) => ({
+              title: element.data.title,
+              summary: element.data.summary || firstFilledField(element.data),
+              positionDays: element.data.fields.timelinePosition,
+            })),
+            previousSuggestions: plotTimelineSuggestions.map((suggestion) => ({
+              title: suggestion.data.proposedTitle,
+              summary: suggestion.data.proposedSummary || suggestion.data.proposedValue,
+              status: suggestion.data.status,
+            })),
+            referenceFiles: references.map((reference) => reference.data.fileName),
+          }),
         })
         if (!response.ok || controller.signal.aborted) return
-        const idea = await response.json() as { title?: string; description?: string; positionDays?: number }
-        if (!idea.title || !Number.isFinite(idea.positionDays)) return
-        await createTimelineSuggestion({
-          projectId: project.recordId,
-          elementId: '',
-          fieldKey: '__timeline__',
-          prompt: 'A concise AI event idea for the visible timeline range.',
-          proposedValue: idea.description || '',
-          status: 'pending',
-          revisionInstruction: '',
-          replacesSuggestionId: '',
-          suggestionType: 'card',
-          targetSection: 'plot',
-          proposedFields: { timelinePosition: String(idea.positionDays) },
-          proposedTitle: idea.title,
-          proposedSummary: idea.description || '',
-        })
+        const payload = await response.json() as { ideas?: Array<{ title?: string; description?: string; positionDays?: number }> }
+        const seenTitles = new Set([
+          ...elements.map((element) => normalizeIdeaTitle(element.data.title)),
+          ...plotTimelineSuggestions.map((suggestion) => normalizeIdeaTitle(suggestion.data.proposedTitle)),
+        ])
+        for (const idea of payload.ideas ?? []) {
+          const titleKey = normalizeIdeaTitle(idea.title)
+          if (!idea.title || !titleKey || seenTitles.has(titleKey) || !Number.isFinite(idea.positionDays)) continue
+          seenTitles.add(titleKey)
+          await createTimelineSuggestion({
+            projectId: project.recordId,
+            elementId: '',
+            fieldKey: '__timeline__',
+            prompt: 'A concise AI event idea for the visible timeline range.',
+            proposedValue: idea.description || '',
+            status: 'pending',
+            revisionInstruction: '',
+            replacesSuggestionId: '',
+            suggestionType: 'card',
+            targetSection: 'plot',
+            proposedFields: { timelinePosition: String(idea.positionDays) },
+            proposedTitle: idea.title,
+            proposedSummary: idea.description || '',
+          })
+        }
       } catch {
         // A timeline idea is optional and should never interrupt story work.
       }
     })()
     return () => controller.abort()
-  }, [aiEnabled, createTimelineSuggestion, pendingTimelineIdeas.length, project.data.genre, project.data.premise, project.data.title, project.recordId, smallestUnit.days, viewportEndDays, viewportStartDays, zoomLevel])
+  }, [aiEnabled, createTimelineSuggestion, elements, pendingTimelineIdeas.length, plotTimelineSuggestions, project.data.genre, project.data.lessonsMorals, project.data.premise, project.data.title, project.recordId, references, smallestUnit.days, viewportEndDays, viewportStartDays, zoomLevel])
 
   useEffect(() => {
     const viewport = trackRef.current
@@ -1915,20 +1945,26 @@ function PlotEventTimeline({ project, elements, onOpen, onAddEvent, onAddSketchE
     setEventCursor(0)
     setFocusedEventId((eventId) => eventId && nearbyPositions.some(({ element }) => element.recordId === eventId) ? eventId : null)
   }, [eventGroupKey])
-  const timelineIdea = pendingTimelineIdeas[0] ?? null
+  const openTimelineIdea = openTimelineIdeaId ? visibleTimelineIdeas.find((idea) => idea.recordId === openTimelineIdeaId) ?? null : null
+  const timelineIdea = openTimelineIdea
   const timelineIdeaPosition = Number(timelineIdea?.data.proposedFields?.timelinePosition)
-  const timelineIdeaLeft = timelineIdea && Number.isFinite(timelineIdeaPosition) ? timelineLeft(timelineIdeaPosition) : null
   const eventStubTop = rulerY + 16
   const timelineIdeaTop = rulerY + 6
   const timelineHeight = 120
   const eventStepDays = smallestUnit.days
   const visibleEventIndex = visibleEvent ? positions.findIndex(({ element }) => element.recordId === visibleEvent.element.recordId) : -1
 
-  function acceptTimelineIdea() {
-    if (!timelineIdea || !Number.isFinite(timelineIdeaPosition)) return
-    onAddEvent(timelineIdeaPosition, { title: timelineIdea.data.proposedTitle || 'Suggested event', summary: timelineIdea.data.proposedSummary || timelineIdea.data.proposedValue })
-    void removeTimelineSuggestion(timelineIdea.recordId)
+  function acceptTimelineIdea(idea = timelineIdea) {
+    const position = Number(idea?.data.proposedFields?.timelinePosition)
+    if (!idea || !Number.isFinite(position)) return
+    onAddEvent(position, { title: idea.data.proposedTitle || 'Suggested event', summary: idea.data.proposedSummary || idea.data.proposedValue })
+    void putTimelineSuggestion(idea.recordId, { status: 'accepted' })
     setOpenTimelineIdeaId(null)
+  }
+
+  function rejectTimelineIdea(idea: RecordData<Suggestion>) {
+    void putTimelineSuggestion(idea.recordId, { status: 'deleted' })
+    if (openTimelineIdeaId === idea.recordId) setOpenTimelineIdeaId(null)
   }
 
   function moveVisibleEvent(direction: -1 | 1) {
@@ -1964,7 +2000,7 @@ function PlotEventTimeline({ project, elements, onOpen, onAddEvent, onAddSketchE
         <button type="button" onClick={() => setView('timeline')} className={cn('border-b-2 px-2 pb-2 text-sm font-medium', view === 'timeline' ? 'border-primary text-foreground' : 'border-transparent text-muted-foreground')}>Timeline</button>
         <button type="button" onClick={() => setView('events')} className={cn('border-b-2 px-2 pb-2 text-sm font-medium', view === 'events' ? 'border-primary text-foreground' : 'border-transparent text-muted-foreground')}>Events</button>
       </div>
-      {view === 'events' ? <EventOrganizer elements={elements} spanDays={span} selectedId={selectedId} onSelect={setSelectedId} onAddSketchEvent={onAddSketchEvent} /> : <div ref={trackRef} onScroll={updateTimelineViewport}
+      {view === 'events' ? <EventOrganizer elements={elements} suggestions={visibleTimelineIdeas} spanDays={span} selectedId={selectedId} onSelect={setSelectedId} onAddSketchEvent={onAddSketchEvent} onAcceptSuggestion={acceptTimelineIdea} onRejectSuggestion={rejectTimelineIdea} /> : <div ref={trackRef} onScroll={updateTimelineViewport}
         onPointerMove={(event) => {
           if (event.pointerType === 'touch') return
           const viewport = event.currentTarget
@@ -2018,7 +2054,11 @@ function PlotEventTimeline({ project, elements, onOpen, onAddEvent, onAddSketchE
           {activeMarkerX !== null && (
             <div aria-hidden className="pointer-events-none absolute z-10 h-8 w-px -translate-y-1/2 bg-white shadow-[0_0_2px_rgba(0,0,0,0.65)]" style={{ top: `${rulerY}px`, left: `${activeMarkerX}px` }} />
           )}
-          {timelineIdea && timelineIdeaLeft !== null && <button type="button" aria-label="Review AI event idea" title="Review AI event idea" onClick={() => setOpenTimelineIdeaId(timelineIdea.recordId)} className="absolute z-10 -translate-x-1/2 rounded p-1 text-amber-500 transition-colors hover:bg-amber-500/10" style={{ left: `${timelineIdeaLeft.toFixed(2)}px`, top: `${timelineIdeaTop}px` }}><Lightbulb className="size-5" aria-hidden /></button>}
+          {visibleTimelineIdeas.map((idea) => {
+            const position = Number(idea.data.proposedFields?.timelinePosition)
+            if (!Number.isFinite(position)) return null
+            return <button key={idea.recordId} type="button" aria-label="Review AI event idea" title={idea.data.proposedTitle || 'Review AI event idea'} onClick={() => setOpenTimelineIdeaId(idea.recordId)} className={cn('absolute z-10 -translate-x-1/2 rounded p-1 text-amber-500 transition-colors hover:bg-amber-500/10', openTimelineIdeaId === idea.recordId && 'bg-amber-500/10')} style={{ left: `${timelineLeft(position).toFixed(2)}px`, top: `${timelineIdeaTop}px` }}><Lightbulb className="size-5" aria-hidden /></button>
+          })}
         </div>
       </div>}
       <div className="flex min-h-7 items-center justify-center text-center text-xs tabular-nums text-foreground" aria-label="Timeline hover time">
@@ -2031,7 +2071,7 @@ function PlotEventTimeline({ project, elements, onOpen, onAddEvent, onAddSketchE
         <section className="mt-4 rounded-lg border border-amber-500/40 bg-amber-500/5 p-4">
           <div className="flex items-start justify-between gap-3"><div><p className="text-xs font-medium text-muted-foreground">AI event idea</p><h4 className="mt-1 font-semibold text-foreground">{timelineIdea.data.proposedTitle || 'Suggested event'}</h4></div><IconButton label="Close AI event idea" onClick={() => setOpenTimelineIdeaId(null)}><X aria-hidden /></IconButton></div>
           <p className="mt-3 text-sm text-muted-foreground">{timelineIdea.data.proposedSummary || timelineIdea.data.proposedValue}</p>
-          <div className="mt-4 flex justify-end gap-2"><Button variant="outline" size="sm" onClick={() => { void removeTimelineSuggestion(timelineIdea.recordId); setOpenTimelineIdeaId(null) }}><X aria-hidden />Reject</Button><Button size="sm" onClick={acceptTimelineIdea}><Check aria-hidden />Accept event</Button></div>
+          <div className="mt-4 flex justify-end gap-2"><Button variant="outline" size="sm" onClick={() => rejectTimelineIdea(timelineIdea)}><X aria-hidden />Reject</Button><Button size="sm" onClick={() => acceptTimelineIdea(timelineIdea)}><Check aria-hidden />Accept event</Button></div>
         </section>
       )}
       {selected ? (
@@ -2043,7 +2083,25 @@ function PlotEventTimeline({ project, elements, onOpen, onAddEvent, onAddSketchE
   )
 }
 
-function EventOrganizer({ elements, spanDays, selectedId, onSelect, onAddSketchEvent }: { elements: RecordData<StoryElement>[]; spanDays: number; selectedId: string | null; onSelect: (id: string) => void; onAddSketchEvent: () => void }) {
+function EventOrganizer({
+  elements,
+  suggestions,
+  spanDays,
+  selectedId,
+  onSelect,
+  onAddSketchEvent,
+  onAcceptSuggestion,
+  onRejectSuggestion,
+}: {
+  elements: RecordData<StoryElement>[]
+  suggestions: RecordData<Suggestion>[]
+  spanDays: number
+  selectedId: string | null
+  onSelect: (id: string) => void
+  onAddSketchEvent: () => void
+  onAcceptSuggestion: (suggestion: RecordData<Suggestion>) => void
+  onRejectSuggestion: (suggestion: RecordData<Suggestion>) => void
+}) {
   const { put } = useMutations<StoryElement>('elements')
   const ordered = useMemo(() => elements.filter((element) => Number.isFinite(Number(element.data.fields.timelinePosition)) && element.data.fields.timelinePosition.trim() !== '').sort((a, b) => Number(a.data.fields.timelinePosition) - Number(b.data.fields.timelinePosition) || a.data.order - b.data.order), [elements])
   const unordered = useMemo(() => elements.filter((element) => !Number.isFinite(Number(element.data.fields.timelinePosition)) || element.data.fields.timelinePosition.trim() === '').sort((a, b) => a.data.order - b.data.order), [elements])
@@ -2089,6 +2147,24 @@ function EventOrganizer({ elements, spanDays, selectedId, onSelect, onAddSketchE
     </button>
   }
 
+  function SuggestionStub({ suggestion }: { suggestion: RecordData<Suggestion> }) {
+    const position = Number(suggestion.data.proposedFields?.timelinePosition)
+    return <article className="relative z-10 min-h-16 rounded-md border border-dashed border-amber-500/50 bg-amber-500/5 p-3 text-left">
+      <div className="flex items-start gap-2">
+        <Lightbulb className="mt-0.5 size-4 shrink-0 text-amber-500" aria-hidden />
+        <div className="min-w-0 flex-1">
+          <span className="block truncate text-sm font-medium text-foreground">{suggestion.data.proposedTitle || 'Suggested event'}</span>
+          <span className="mt-1 block line-clamp-2 text-xs text-muted-foreground">{suggestion.data.proposedSummary || suggestion.data.proposedValue || 'Review this plot sketch.'}</span>
+          {Number.isFinite(position) && <span className="mt-2 block text-[11px] font-medium text-amber-600 dark:text-amber-400">{formatTimelineTimestamp(position, storyTimelineUnits(spanDays))}</span>}
+        </div>
+      </div>
+      <div className="mt-3 flex justify-end gap-1">
+        <Button variant="ghost" size="sm" aria-label="Reject AI plot sketch" title="Reject AI plot sketch" onClick={() => onRejectSuggestion(suggestion)}><X aria-hidden /></Button>
+        <Button variant="ghost" size="sm" aria-label="Accept AI plot sketch" title="Accept AI plot sketch" onClick={() => onAcceptSuggestion(suggestion)}><Check aria-hidden /></Button>
+      </div>
+    </article>
+  }
+
   return <DndContext sensors={sensors} collisionDetection={closestCenter} onDragStart={(event) => setDraggedId(event.active.id.toString())} onDragCancel={() => setDraggedId(null)} onDragEnd={handleDragEnd}><div className="mt-5 max-h-[560px] overflow-y-auto pr-1">
     <section id="ordered-drop">
       <p className="mb-3 text-xs font-semibold uppercase tracking-wide text-muted-foreground">Ordered events</p>
@@ -2100,6 +2176,7 @@ function EventOrganizer({ elements, spanDays, selectedId, onSelect, onAddSketchE
     <section id="unordered-drop">
       <div className="mb-3 flex items-center justify-between gap-3"><p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Unordered sketches</p><Button variant="outline" size="sm" onClick={onAddSketchEvent}><Plus aria-hidden />New Event</Button></div>
       <SortableContext items={unordered.map((element) => element.recordId)} strategy={rectSortingStrategy}><div className="grid grid-cols-[repeat(auto-fill,minmax(160px,1fr))] gap-3">
+        {suggestions.map((suggestion) => <SuggestionStub key={suggestion.recordId} suggestion={suggestion} />)}
         {unordered.length ? unordered.map((element) => <EventStub key={element.recordId} element={element} destination="unordered" />) : <p className="col-span-full rounded-md border border-dashed border-border p-5 text-sm text-muted-foreground">Drag an event here when its chronology is still a sketch.</p>}
       </div></SortableContext>
     </section>

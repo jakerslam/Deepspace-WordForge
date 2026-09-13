@@ -130,7 +130,15 @@ export function registerAiChatRoutes(
     const authHeader = c.req.header('Authorization') ?? ''
     const jwt = authHeader.startsWith('Bearer ') ? authHeader.slice(7) : ''
     if (!jwt) return c.json({ error: 'Unauthorized' }, 401)
-    const body = await c.req.json<{ project?: Record<string, unknown>; startDays?: number; endDays?: number }>()
+    const body = await c.req.json<{
+      project?: Record<string, unknown>
+      startDays?: number
+      endDays?: number
+      count?: number
+      existingEvents?: Array<{ title?: string; summary?: string; positionDays?: number | string | null }>
+      previousSuggestions?: Array<{ title?: string; summary?: string; status?: string }>
+      referenceFiles?: string[]
+    }>()
     if (!body.project || !Number.isFinite(body.startDays) || !Number.isFinite(body.endDays)) return c.json({ error: 'project and timeline range are required' }, 400)
     const startDays = body.startDays as number
     const endDays = body.endDays as number
@@ -140,16 +148,33 @@ export function registerAiChatRoutes(
       profile: 'application',
       modelId: selectedModel.modelId,
       authToken: jwt,
-      system: 'You are Word Forge. Return only valid JSON with title, description, and positionDays. Suggest one concise plot event. title must be under 60 characters, description under 220 characters, and positionDays must be a number inside the provided range. No markdown or preamble.',
-      messages: [{ role: 'user', content: `Project: ${JSON.stringify(body.project)}\nVisible timeline range in days: ${startDays} to ${endDays}. Suggest one event that fits this specific part of the story.` }],
+      system: 'You are Word Forge. Return only valid JSON with an ideas array. Suggest concise plot events that build from the supplied project, references, existing plot events, and previous suggestions. Avoid repeating any existing or previous title, premise beat, or event function. Each title must be under 60 characters, each description under 220 characters, and each positionDays must be a number inside the provided range. No markdown or preamble.',
+      messages: [{
+        role: 'user',
+        content: [
+          `Project: ${JSON.stringify(body.project)}`,
+          `Visible timeline range in days: ${startDays} to ${endDays}.`,
+          `Return up to ${Math.max(1, Math.min(3, Math.round(Number(body.count) || 1)))} plot event ideas.`,
+          `Existing plot events: ${JSON.stringify(body.existingEvents ?? [])}`,
+          `Previous suggestions: ${JSON.stringify(body.previousSuggestions ?? [])}`,
+          `Reference files available to the story: ${JSON.stringify(body.referenceFiles ?? [])}`,
+          'Prefer ideas that can be accepted as timeline events or kept as unordered plot sketches.',
+        ].join('\n'),
+      }],
       abortSignal: c.req.raw.signal,
     })
     const raw = (await result.text).trim().replace(/^```json\s*|```$/g, '').trim()
     try {
-      const parsed = JSON.parse(raw) as { title?: string; description?: string; positionDays?: number }
-      const position = Math.max(startDays, Math.min(endDays, Number(parsed.positionDays)))
-      if (!Number.isFinite(position)) throw new Error('Invalid position')
-      return c.json({ title: parsed.title || 'Suggested event', description: parsed.description || '', positionDays: position })
+      type TimelineIdeaResponse = { title?: string; description?: string; positionDays?: number }
+      const parsed = JSON.parse(raw) as { ideas?: TimelineIdeaResponse[] } | TimelineIdeaResponse
+      const rawIdeas: TimelineIdeaResponse[] = 'ideas' in parsed && Array.isArray(parsed.ideas) ? parsed.ideas : [parsed as TimelineIdeaResponse]
+      const ideas = rawIdeas.map((idea) => {
+        const position = Math.max(startDays, Math.min(endDays, Number(idea.positionDays)))
+        if (!Number.isFinite(position)) return null
+        return { title: idea.title || 'Suggested event', description: idea.description || '', positionDays: position }
+      }).filter(Boolean).slice(0, 3)
+      if (!ideas.length) throw new Error('Invalid position')
+      return c.json({ ideas })
     } catch {
       return c.json({ error: 'The model returned an unusable timeline idea' }, 422)
     }
