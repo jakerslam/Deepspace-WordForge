@@ -1695,6 +1695,7 @@ function formatTimelineTimestamp(days: number, units: typeof TIME_UNITS) {
 
 function PlotEventTimeline({ project, elements, onOpen, onAddEvent, aiEnabled }: { project: RecordData<Project>; elements: RecordData<StoryElement>[]; onOpen: (id: string) => void; onAddEvent: (days: number, detail?: { title: string; summary: string }) => void; aiEnabled: boolean }) {
   const trackRef = useRef<HTMLDivElement>(null)
+  const [view, setView] = useState<'timeline' | 'events'>('timeline')
   const [selectedId, setSelectedId] = useState<string | null>(null)
   const [zoomLevel, setZoomLevel] = useState(0)
   const [timelineViewport, setTimelineViewport] = useState({ left: 0, width: 900 })
@@ -1712,7 +1713,7 @@ function PlotEventTimeline({ project, elements, onOpen, onAddEvent, aiEnabled }:
     const parsed = Number(raw)
     return Number.isFinite(parsed) ? parsed : null
   }
-  const ordered = useMemo(() => [...elements].sort((a, b) => {
+  const ordered = useMemo(() => elements.filter((element) => readPosition(element) !== null).sort((a, b) => {
     const aPosition = readPosition(a)
     const bPosition = readPosition(b)
     return (aPosition ?? Number.MAX_SAFE_INTEGER) - (bPosition ?? Number.MAX_SAFE_INTEGER) || a.data.order - b.data.order
@@ -1724,7 +1725,7 @@ function PlotEventTimeline({ project, elements, onOpen, onAddEvent, aiEnabled }:
   const smallestUnitIndex = Math.max(0, Math.min(topUnitIndex, topUnitIndex - 2 - zoomLevel))
   const visibleUnits = TIME_UNITS.slice(smallestUnitIndex, topUnitIndex + 1).reverse()
   const smallestUnit = TIME_UNITS[smallestUnitIndex]
-  const selected = ordered.find((element) => element.recordId === selectedId) ?? null
+  const selected = elements.find((element) => element.recordId === selectedId) ?? null
   const totalTopUnits = span / topUnit.days
   const totalSmallestUnits = Math.max(1, Math.round(totalTopUnits * smallestUnitsPer(topUnitIndex, smallestUnitIndex)))
   const measuredTimelineWidthPixels = Math.max(
@@ -1937,7 +1938,11 @@ function PlotEventTimeline({ project, elements, onOpen, onAddEvent, aiEnabled }:
           <Button variant="ghost" size="sm" onClick={() => setZoomLevel((level) => Math.min(Math.max(0, topUnitIndex - 2), level + 1))} disabled={zoomLevel >= Math.max(0, topUnitIndex - 2)} aria-label="Zoom in timeline" title="Zoom in timeline"><ZoomIn aria-hidden /></Button>
         </div>
       </div>
-      <div ref={trackRef} onScroll={updateTimelineViewport}
+      <div className="mt-4 flex items-center justify-center gap-6 border-b border-border">
+        <button type="button" onClick={() => setView('timeline')} className={cn('border-b-2 px-2 pb-2 text-sm font-medium', view === 'timeline' ? 'border-primary text-foreground' : 'border-transparent text-muted-foreground')}>Timeline</button>
+        <button type="button" onClick={() => setView('events')} className={cn('border-b-2 px-2 pb-2 text-sm font-medium', view === 'events' ? 'border-primary text-foreground' : 'border-transparent text-muted-foreground')}>Events</button>
+      </div>
+      {view === 'events' ? <EventOrganizer elements={elements} spanDays={span} selectedId={selectedId} onSelect={setSelectedId} /> : <div ref={trackRef} onScroll={updateTimelineViewport}
         onPointerMove={(event) => {
           if (event.pointerType === 'touch') return
           const viewport = event.currentTarget
@@ -1993,7 +1998,7 @@ function PlotEventTimeline({ project, elements, onOpen, onAddEvent, aiEnabled }:
           )}
           {timelineIdea && timelineIdeaLeft !== null && <button type="button" aria-label="Review AI event idea" title="Review AI event idea" onClick={() => setOpenTimelineIdeaId(timelineIdea.recordId)} className="absolute z-10 -translate-x-1/2 rounded p-1 text-amber-500 transition-colors hover:bg-amber-500/10" style={{ left: `${timelineIdeaLeft.toFixed(2)}px`, top: `${timelineIdeaTop}px` }}><Lightbulb className="size-5" aria-hidden /></button>}
         </div>
-      </div>
+      </div>}
       <div className="flex min-h-7 items-center justify-center text-center text-xs tabular-nums text-foreground" aria-label="Timeline hover time">
         {activeTimelineDays !== null ? hoverTimeLabel : '\u00a0'}
       </div>
@@ -2014,6 +2019,59 @@ function PlotEventTimeline({ project, elements, onOpen, onAddEvent, aiEnabled }:
       ) : <p className="mt-4 text-sm text-muted-foreground">Select an event to preview its description, then open it to edit the full card.</p>}
     </section>
   )
+}
+
+function EventOrganizer({ elements, spanDays, selectedId, onSelect }: { elements: RecordData<StoryElement>[]; spanDays: number; selectedId: string | null; onSelect: (id: string) => void }) {
+  const { put } = useMutations<StoryElement>('elements')
+  const ordered = useMemo(() => elements.filter((element) => Number.isFinite(Number(element.data.fields.timelinePosition)) && element.data.fields.timelinePosition.trim() !== '').sort((a, b) => Number(a.data.fields.timelinePosition) - Number(b.data.fields.timelinePosition) || a.data.order - b.data.order), [elements])
+  const unordered = useMemo(() => elements.filter((element) => !Number.isFinite(Number(element.data.fields.timelinePosition)) || element.data.fields.timelinePosition.trim() === '').sort((a, b) => a.data.order - b.data.order), [elements])
+  const [draggedId, setDraggedId] = useState<string | null>(null)
+  const span = spanDays
+  const eventStep = TIME_UNITS[0].days
+
+  async function moveEvent(targetId: string, destination: 'ordered' | 'unordered') {
+    if (!draggedId) return
+    const source = elements.find((element) => element.recordId === draggedId)
+    const target = elements.find((element) => element.recordId === targetId)
+    if (!source || (destination === 'ordered' && !target && ordered.length > 0)) return
+    const sourcePosition = Number(source.data.fields.timelinePosition)
+    const targetPosition = target ? Number(target.data.fields.timelinePosition) : Number.NaN
+    if (destination === 'ordered' && target && Number.isFinite(sourcePosition) && Number.isFinite(targetPosition)) {
+      await Promise.all([
+        put(source.recordId, { fields: { ...source.data.fields, timelinePosition: String(targetPosition) } }),
+        put(target.recordId, { fields: { ...target.data.fields, timelinePosition: String(sourcePosition) } }),
+      ])
+    } else if (destination === 'unordered') {
+      await put(source.recordId, { fields: { ...source.data.fields, timelinePosition: '' }, canonState: 'Sketch' })
+    } else if (destination === 'ordered') {
+      const latest = ordered.reduce((max, element) => Math.max(max, Number(element.data.fields.timelinePosition)), 0)
+      await put(source.recordId, { fields: { ...source.data.fields, timelinePosition: String(Math.min(span, latest + eventStep)) }, canonState: 'Canon' })
+    }
+    setDraggedId(null)
+  }
+
+  function EventStub({ element, destination }: { element: RecordData<StoryElement>; destination: 'ordered' | 'unordered' }) {
+    return <button type="button" draggable onDragStart={() => setDraggedId(element.recordId)} onDragEnd={() => setDraggedId(null)} onDragOver={(event) => event.preventDefault()} onDrop={() => { void moveEvent(element.recordId, destination) }} onClick={() => onSelect(element.recordId)} className={cn('min-h-16 rounded-md border border-border bg-background p-3 text-left transition-colors hover:border-primary', selectedId === element.recordId && 'border-primary ring-2 ring-primary/20', draggedId === element.recordId && 'opacity-50')}>
+      <span className="block truncate text-sm font-medium text-foreground">{element.data.title || 'Untitled event'}</span>
+      <span className="mt-1 block line-clamp-2 text-xs text-muted-foreground">{element.data.summary || firstFilledField(element.data) || 'Open to add a description.'}</span>
+    </button>
+  }
+
+  return <div className="mt-5 max-h-[560px] overflow-y-auto pr-1">
+    <section onDragOver={(event) => event.preventDefault()} onDrop={() => { if (draggedId) void moveEvent(ordered.at(-1)?.recordId ?? '', 'ordered') }}>
+      <p className="mb-3 text-xs font-semibold uppercase tracking-wide text-muted-foreground">Ordered events</p>
+      <div className="grid grid-cols-[repeat(auto-fill,minmax(160px,1fr))] gap-3">
+        {ordered.length ? ordered.map((element) => <EventStub key={element.recordId} element={element} destination="ordered" />) : <p className="col-span-full rounded-md border border-dashed border-border p-5 text-sm text-muted-foreground">Drag events here to place them on the story timeline.</p>}
+      </div>
+    </section>
+    <div className="my-6 border-t border-dotted border-muted-foreground/60" />
+    <section onDragOver={(event) => event.preventDefault()} onDrop={() => { if (draggedId) void moveEvent(draggedId, 'unordered') }}>
+      <p className="mb-3 text-xs font-semibold uppercase tracking-wide text-muted-foreground">Unordered sketches</p>
+      <div className="grid grid-cols-[repeat(auto-fill,minmax(160px,1fr))] gap-3">
+        {unordered.length ? unordered.map((element) => <EventStub key={element.recordId} element={element} destination="unordered" />) : <p className="col-span-full rounded-md border border-dashed border-border p-5 text-sm text-muted-foreground">Drag an event here when its chronology is still a sketch.</p>}
+      </div>
+    </section>
+  </div>
 }
 
 function formatEventTime(days: number, unit: { label: string; days: number }) {
