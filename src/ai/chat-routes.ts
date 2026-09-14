@@ -55,6 +55,13 @@ function recordRoomStub(env: Env): DurableObjectStub {
 // blocks accidental DoS via megabyte payloads.
 const MAX_USER_CONTENT_LENGTH = 100_000
 
+function modelJsonText(raw: string): string {
+  const cleaned = raw.trim().replace(/^```(?:json)?\s*/i, '').replace(/```$/g, '').trim()
+  const firstBrace = cleaned.indexOf('{')
+  const lastBrace = cleaned.lastIndexOf('}')
+  return firstBrace >= 0 && lastBrace > firstBrace ? cleaned.slice(firstBrace, lastBrace + 1) : cleaned
+}
+
 // Derive a chat title from the first user message — first non-empty line,
 // trimmed to ~50 chars with an ellipsis.
 function deriveTitle(content: string): string {
@@ -224,7 +231,7 @@ export function registerAiChatRoutes(
       profile: 'application',
       modelId: selectedModel.modelId,
       authToken: jwt,
-      system: 'You are Word Forge. Treat reference excerpts as first-class source material. Return only valid JSON with voiceTone, pacing, descriptionStyle, dialogueStyle, pointOfView, and styleNotes. Keep every value concise and directly useful for drafting. Do not imitate a living author; translate inspiration into neutral craft terms. No markdown or preamble.',
+      system: 'You are Word Forge. Treat reference excerpts as first-class source material. Return only valid JSON with exactly these string keys: voiceTone, pacing, descriptionStyle, dialogueStyle, pointOfView, and styleNotes. Keep every value concise and directly useful for drafting. Do not imitate a living author; translate inspiration into neutral craft terms. No markdown or preamble.',
       messages: [{ role: 'user', content: [
         `Project: ${JSON.stringify(body.project)}`,
         `Story elements: ${JSON.stringify(body.elements ?? [])}`,
@@ -234,18 +241,35 @@ export function registerAiChatRoutes(
       ].join('\n') }],
       abortSignal: c.req.raw.signal,
     })
-    const raw = (await result.text).trim().replace(/^```json\s*|```$/g, '').trim()
+    const raw = modelJsonText(await result.text)
     try {
-      const parsed = JSON.parse(raw) as Record<string, string>
-      return c.json({
-        voiceTone: parsed.voiceTone || '',
-        pacing: parsed.pacing || '',
-        descriptionStyle: parsed.descriptionStyle || '',
-        dialogueStyle: parsed.dialogueStyle || '',
-        pointOfView: parsed.pointOfView || '',
-        styleNotes: parsed.styleNotes || '',
-      })
+      const parsedRoot = JSON.parse(raw) as Record<string, unknown>
+      const parsed = typeof parsedRoot.settings === 'object' && parsedRoot.settings !== null ? parsedRoot.settings as Record<string, unknown> : parsedRoot
+      const readString = (...keys: string[]) => keys.map((key) => parsed[key]).find((value): value is string => typeof value === 'string' && Boolean(value.trim()))?.trim() ?? ''
+      const settings = {
+        voiceTone: readString('voiceTone', 'voice', 'tone', 'emotionalVoice', 'emotional_voice'),
+        pacing: readString('pacing', 'pace'),
+        descriptionStyle: readString('descriptionStyle', 'description', 'description_style'),
+        dialogueStyle: readString('dialogueStyle', 'dialogue', 'dialogue_style'),
+        pointOfView: readString('pointOfView', 'pov', 'point_of_view'),
+        styleNotes: readString('styleNotes', 'style_notes', 'notes', 'inspirationNotes'),
+      }
+      if (!Object.values(settings).some(Boolean)) throw new Error('Empty voice settings')
+      return c.json(settings)
     } catch {
+      const lineValue = (label: string) => {
+        const match = raw.match(new RegExp(`${label.replace(/\s+/g, '[\\s_-]*')}\\s*[:\\-]\\s*(.+)`, 'i'))
+        return match?.[1]?.split('\n')[0]?.trim() ?? ''
+      }
+      const fallback = {
+        voiceTone: lineValue('voice tone') || lineValue('emotional voice'),
+        pacing: lineValue('pacing'),
+        descriptionStyle: lineValue('description style'),
+        dialogueStyle: lineValue('dialogue style'),
+        pointOfView: lineValue('point of view'),
+        styleNotes: lineValue('style notes') || lineValue('inspiration notes'),
+      }
+      if (Object.values(fallback).some(Boolean)) return c.json(fallback)
       return c.json({ error: 'The model returned unusable voice settings' }, 422)
     }
   })

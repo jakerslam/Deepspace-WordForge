@@ -328,7 +328,7 @@ function ProjectDashboard({
 function CreateProjectCard({ onOpen }: { onOpen: (id: string) => void }) {
   const { create: createProject } = useMutations<Project>('projects')
   const { create: createElement } = useMutations<StoryElement>('elements')
-  const { success } = useToast()
+  const { success, error } = useToast()
   const [title, setTitle] = useState('')
   const [premise, setPremise] = useState('')
   const [genre, setGenre] = useState<Genre>('Fantasy')
@@ -1574,6 +1574,7 @@ function ChaptersStage({
 }) {
   const { create, put } = useMutations<Chapter>('chapters')
   const { put: putProject } = useMutations<Project>('projects')
+  const { success, error } = useToast()
   const canonElements = elements.filter((element) => element.data.canonState === 'Canon')
   const targetPages = project.data.targetPages || 100
   const targetPageRange = pageTargetRange(targetPages)
@@ -1621,7 +1622,11 @@ function ChaptersStage({
           referenceExcerpts,
         }),
       })
-      if (!response.ok) return
+      if (!response.ok) {
+        const detail = await response.json().catch(() => null) as { error?: string } | null
+        error('Could not generate voice settings', detail?.error)
+        return
+      }
       const data = await response.json() as Partial<Pick<Project, 'voiceTone' | 'pacing' | 'descriptionStyle' | 'dialogueStyle' | 'pointOfView' | 'styleNotes'>>
       const patch = {
         voiceTone: data.voiceTone ?? '',
@@ -1631,8 +1636,13 @@ function ChaptersStage({
         pointOfView: data.pointOfView ?? '',
         styleNotes: data.styleNotes ?? '',
       }
+      if (!Object.values(patch).some((value) => value.trim())) {
+        error('Could not generate voice settings', 'The assistant returned an empty draft.')
+        return
+      }
       setVoiceDraft(patch)
-      void putProject(project.recordId, patch)
+      await putProject(project.recordId, patch)
+      success('Voice settings generated')
     } finally {
       setIsGeneratingVoice(false)
     }
@@ -1701,7 +1711,7 @@ function ChaptersStage({
               <input type="range" min="0" max={READING_LEVELS.length - 1} step="1" value={Math.max(0, READING_LEVELS.indexOf(project.data.readingLevel ?? 'Adult'))} onChange={(event) => putProject(project.recordId, { readingLevel: READING_LEVELS[Number(event.target.value)] })} aria-label="Reading level" className="mt-3 w-full accent-primary" />
             </Field>
           </div>
-          <div className="mt-5 flex justify-start"><Button size="sm" onClick={() => unlockChapterStage(2)}>Next</Button></div>
+          <div className="mt-5 flex justify-end"><Button size="sm" onClick={() => unlockChapterStage(2)}>Next</Button></div>
         </div>}
       </section>
       {unlockedChapterStage >= 2 && <section className="mb-5 overflow-hidden rounded-lg border border-border bg-card">
@@ -1727,7 +1737,7 @@ function ChaptersStage({
             <Field label="Point of view"><Input value={voiceDraft.pointOfView} onChange={(event) => persistVoice('pointOfView', event.target.value)} placeholder={POINTS_OF_VIEW.join(', ')} /></Field>
             <Field label="Inspiration notes"><Input value={voiceDraft.styleNotes} onChange={(event) => persistVoice('styleNotes', event.target.value)} placeholder="Short sentences, dry humor, close interiority" /></Field>
           </div>
-          <div className="mt-5 flex justify-start"><Button size="sm" onClick={() => unlockChapterStage(3)}>Next</Button></div>
+          <div className="mt-5 flex justify-end"><Button size="sm" onClick={() => unlockChapterStage(3)}>Next</Button></div>
         </div>}
       </section>}
       {unlockedChapterStage >= 3 && <section className="overflow-hidden rounded-lg border border-border bg-card">
