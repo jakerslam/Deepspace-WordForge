@@ -1740,6 +1740,10 @@ function isSimilarStoryBeat(candidate: string, existing: string) {
   return overlap / Math.min(candidateTokens.size, existingTokens.size) >= 0.62
 }
 
+function clampNumber(value: number, min: number, max: number) {
+  return Math.max(min, Math.min(max, value))
+}
+
 function PlotEventTimeline({ project, elements, references, onOpen, onAddEvent, onAddSketchEvent, aiEnabled }: { project: RecordData<Project>; elements: RecordData<StoryElement>[]; references: RecordData<Reference>[]; onOpen: (id: string) => void; onAddEvent: (days: number, detail?: { title: string; summary: string }) => void; onAddSketchEvent: () => void; aiEnabled: boolean }) {
   const trackRef = useRef<HTMLDivElement>(null)
   const [view, setView] = useState<'timeline' | 'events'>('timeline')
@@ -1889,7 +1893,7 @@ function PlotEventTimeline({ project, elements, references, onOpen, onAddEvent, 
           }),
         })
         if (!response.ok || controller.signal.aborted) return
-        const payload = await response.json() as { ideas?: Array<{ title?: string; description?: string; positionDays?: number }> }
+        const payload = await response.json() as { ideas?: Array<{ title?: string; description?: string; positionDays?: number; beatFunction?: string; whyDistinct?: string }> }
         const existingBeats = [
           ...elements.map((element) => ideaFingerprint(element.data.title, `${element.data.summary} ${Object.values(element.data.fields).join(' ')}`)),
           ...plotTimelineSuggestions.map((suggestion) => ideaFingerprint(suggestion.data.proposedTitle, suggestion.data.proposedSummary || suggestion.data.proposedValue)),
@@ -1903,7 +1907,7 @@ function PlotEventTimeline({ project, elements, references, onOpen, onAddEvent, 
             elementId: '',
             fieldKey: '__timeline__',
             prompt: 'A concise AI event idea for the visible timeline range.',
-            proposedValue: idea.description || '',
+            proposedValue: [idea.description, idea.beatFunction ? `Beat: ${idea.beatFunction}` : '', idea.whyDistinct ? `Why distinct: ${idea.whyDistinct}` : ''].filter(Boolean).join('\n\n'),
             status: 'pending',
             revisionInstruction: '',
             replacesSuggestionId: '',
@@ -2004,6 +2008,13 @@ function PlotEventTimeline({ project, elements, references, onOpen, onAddEvent, 
   const timelineHeight = 120
   const eventStepDays = smallestUnit.days
   const visibleEventIndex = visibleEvent ? positions.findIndex(({ element }) => element.recordId === visibleEvent.element.recordId) : -1
+  const visibleEventTitle = visibleEvent?.element.data.title || 'Untitled event'
+  const eventStubWidth = Math.min(Math.max(144, visibleEventTitle.length * 8 + 32), Math.max(144, timelineViewport.width - 32))
+  const eventStubCenter = visibleEventLeft === null ? null : clampNumber(
+    visibleEventLeft,
+    timelineViewport.left + eventStubWidth / 2 + 8,
+    timelineViewport.left + timelineViewport.width - eventStubWidth / 2 - 8,
+  )
 
   function acceptTimelineIdea(idea = timelineIdea) {
     const position = Number(idea?.data.proposedFields?.timelinePosition)
@@ -2089,17 +2100,17 @@ function PlotEventTimeline({ project, elements, references, onOpen, onAddEvent, 
           {activeTimelineDays !== null && visibleEventLeft !== null && !visibleEvent && <button type="button" aria-label="Add event at this time" title="Add event at this time" onClick={() => onAddEvent(activeTimelineDays)} className="absolute z-30 flex size-[30px] -translate-x-1/2 items-center justify-center rounded-full border border-white/30 bg-background text-primary shadow-sm transition-colors hover:border-white hover:bg-accent" style={{ left: `${activeMarkerX?.toFixed(2)}px`, top: `${eventStubTop}px` }}><Plus className="size-4" aria-hidden /></button>}
           {visibleEvent && visibleEventLeft !== null && (
             <>
-              <button type="button" aria-label="Add event before this event" title={`Add event ${smallestUnit.label} before`} onClick={() => onAddEvent(Math.max(0, visibleEvent.position - eventStepDays))} className="absolute z-30 flex size-[23px] -translate-x-1/2 items-center justify-center rounded-full border border-white/30 bg-background text-primary shadow-sm transition-colors hover:border-white hover:bg-accent" style={{ left: `${(visibleEventLeft - 104).toFixed(2)}px`, top: `${eventStubTop + 4}px` }}><Plus className="size-3.5" aria-hidden /></button>
-              <button type="button" aria-label="Previous plot event" title="Previous event" onClick={() => moveVisibleEvent(-1)} className="absolute z-30 flex size-7 -translate-x-1/2 items-center justify-center rounded text-muted-foreground transition-colors hover:bg-accent hover:text-foreground" style={{ left: `${(visibleEventLeft - 78).toFixed(2)}px`, top: `${eventStubTop + 2}px` }}><ChevronLeft className="size-4" aria-hidden /></button>
+              <button type="button" aria-label="Add event before this event" title={`Add event ${smallestUnit.label} before`} onClick={() => onAddEvent(Math.max(0, visibleEvent.position - eventStepDays))} className="absolute z-30 flex size-[23px] -translate-x-1/2 items-center justify-center rounded-full border border-white/30 bg-background text-primary shadow-sm transition-colors hover:border-white hover:bg-accent" style={{ left: `${((eventStubCenter ?? visibleEventLeft) - eventStubWidth / 2 - 16).toFixed(2)}px`, top: `${eventStubTop + 4}px` }}><Plus className="size-3.5" aria-hidden /></button>
+              <button type="button" aria-label="Previous plot event" title="Previous event" onClick={() => moveVisibleEvent(-1)} className="absolute z-30 flex size-7 -translate-x-1/2 items-center justify-center rounded text-muted-foreground transition-colors hover:bg-accent hover:text-foreground" style={{ left: `${((eventStubCenter ?? visibleEventLeft) - eventStubWidth / 2 - 40).toFixed(2)}px`, top: `${eventStubTop + 2}px` }}><ChevronLeft className="size-4" aria-hidden /></button>
               <button data-event-id={visibleEvent.element.recordId} type="button"
                 onPointerEnter={() => { setActiveTimelineDays(visibleEvent.position); setFocusedEventId(visibleEvent.element.recordId) }}
                 onClick={() => setSelectedId(visibleEvent.element.recordId)}
                 title={visibleEvent.element.data.title}
-                className={cn('absolute z-30 h-8 w-36 -translate-x-1/2 rounded-md border border-border/30 bg-background px-2 text-left transition-colors hover:border-primary', selected?.recordId === visibleEvent.element.recordId && 'border-primary ring-2 ring-primary/20')} style={{ left: `${visibleEventLeft.toFixed(2)}px`, top: `${eventStubTop}px` }}>
+                className={cn('absolute z-30 h-8 -translate-x-1/2 rounded-md border border-border/30 bg-background px-2 text-left transition-colors hover:border-primary', selected?.recordId === visibleEvent.element.recordId && 'border-primary ring-2 ring-primary/20')} style={{ left: `${(eventStubCenter ?? visibleEventLeft).toFixed(2)}px`, top: `${eventStubTop}px`, width: `${eventStubWidth}px` }}>
                 <span className="block truncate text-sm font-medium text-foreground">{visibleEvent.element.data.title}</span>
               </button>
-              <button type="button" aria-label="Next plot event" title="Next event" onClick={() => moveVisibleEvent(1)} className="absolute z-30 flex size-7 -translate-x-1/2 items-center justify-center rounded text-muted-foreground transition-colors hover:bg-accent hover:text-foreground" style={{ left: `${(visibleEventLeft + 78).toFixed(2)}px`, top: `${eventStubTop + 2}px` }}><ChevronRight className="size-4" aria-hidden /></button>
-              <button type="button" aria-label="Add event after this event" title={`Add event ${smallestUnit.label} after`} onClick={() => onAddEvent(Math.min(span, visibleEvent.position + eventStepDays))} className="absolute z-30 flex size-[23px] -translate-x-1/2 items-center justify-center rounded-full border border-white/30 bg-background text-primary shadow-sm transition-colors hover:border-white hover:bg-accent" style={{ left: `${(visibleEventLeft + 104).toFixed(2)}px`, top: `${eventStubTop + 4}px` }}><Plus className="size-3.5" aria-hidden /></button>
+              <button type="button" aria-label="Next plot event" title="Next event" onClick={() => moveVisibleEvent(1)} className="absolute z-30 flex size-7 -translate-x-1/2 items-center justify-center rounded text-muted-foreground transition-colors hover:bg-accent hover:text-foreground" style={{ left: `${((eventStubCenter ?? visibleEventLeft) + eventStubWidth / 2 + 40).toFixed(2)}px`, top: `${eventStubTop + 2}px` }}><ChevronRight className="size-4" aria-hidden /></button>
+              <button type="button" aria-label="Add event after this event" title={`Add event ${smallestUnit.label} after`} onClick={() => onAddEvent(Math.min(span, visibleEvent.position + eventStepDays))} className="absolute z-30 flex size-[23px] -translate-x-1/2 items-center justify-center rounded-full border border-white/30 bg-background text-primary shadow-sm transition-colors hover:border-white hover:bg-accent" style={{ left: `${((eventStubCenter ?? visibleEventLeft) + eventStubWidth / 2 + 16).toFixed(2)}px`, top: `${eventStubTop + 4}px` }}><Plus className="size-3.5" aria-hidden /></button>
             </>
           )}
           {activeMarkerX !== null && (

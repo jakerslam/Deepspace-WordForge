@@ -149,7 +149,15 @@ export function registerAiChatRoutes(
       profile: 'application',
       modelId: selectedModel.modelId,
       authToken: jwt,
-      system: 'You are Word Forge. Return only valid JSON with an ideas array. Suggest concise plot events that build from the supplied project, references, existing plot events, and previous suggestions. Avoid repeating any existing or previous title, premise beat, or event function. Each title must be under 60 characters, each description under 220 characters, and each positionDays must be a number inside the provided range. No markdown or preamble.',
+      system: [
+        'You are Word Forge running a plot-suggestion workflow.',
+        'Step 1: infer the existing plot beats from the project, reference excerpts, existing events, and prior suggestions.',
+        'Step 2: identify missing or underdeveloped functions such as cause, consequence, complication, reversal, discovery, decision, escalation, sacrifice, reveal, climax, or aftermath.',
+        'Step 3: return only new events that fill one of those gaps in the visible timeline range.',
+        'Do not restate, rename, summarize, or lightly vary an existing event or previous suggestion.',
+        'Return only valid JSON with an ideas array. Each idea must include title, description, positionDays, beatFunction, and whyDistinct.',
+        'Each title must be under 60 characters, each description under 220 characters, and each positionDays must be a number inside the provided range. No markdown or preamble.',
+      ].join(' '),
       messages: [{
         role: 'user',
         content: [
@@ -160,7 +168,7 @@ export function registerAiChatRoutes(
           `Previous suggestions: ${JSON.stringify(body.previousSuggestions ?? [])}`,
           `Reference files available to the story: ${JSON.stringify(body.referenceFiles ?? [])}`,
           `Reference excerpts: ${JSON.stringify(body.referenceExcerpts ?? [])}`,
-          'Do not restate or rename an existing event. A useful idea should add a new cause, consequence, complication, reversal, discovery, or decision.',
+          'For each idea, beatFunction should name the story function it fills. whyDistinct should briefly explain why this is not already covered by existing events or reference material.',
           'Prefer ideas that can be accepted as timeline events or kept as unordered plot sketches.',
         ].join('\n'),
       }],
@@ -168,13 +176,13 @@ export function registerAiChatRoutes(
     })
     const raw = (await result.text).trim().replace(/^```json\s*|```$/g, '').trim()
     try {
-      type TimelineIdeaResponse = { title?: string; description?: string; positionDays?: number }
+      type TimelineIdeaResponse = { title?: string; description?: string; positionDays?: number; beatFunction?: string; whyDistinct?: string }
       const parsed = JSON.parse(raw) as { ideas?: TimelineIdeaResponse[] } | TimelineIdeaResponse
       const rawIdeas: TimelineIdeaResponse[] = 'ideas' in parsed && Array.isArray(parsed.ideas) ? parsed.ideas : [parsed as TimelineIdeaResponse]
       const ideas = rawIdeas.map((idea) => {
         const position = Math.max(startDays, Math.min(endDays, Number(idea.positionDays)))
         if (!Number.isFinite(position)) return null
-        return { title: idea.title || 'Suggested event', description: idea.description || '', positionDays: position }
+        return { title: idea.title || 'Suggested event', description: idea.description || '', positionDays: position, beatFunction: idea.beatFunction || '', whyDistinct: idea.whyDistinct || '' }
       }).filter(Boolean).slice(0, 3)
       if (!ideas.length) throw new Error('Invalid position')
       return c.json({ ideas })
