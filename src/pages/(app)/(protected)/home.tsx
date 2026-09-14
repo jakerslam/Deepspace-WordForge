@@ -591,7 +591,7 @@ function Workspace({
             onCompleted={(completedStages) => openStage(nextStageAfterCompletion('overview', completedStages))}
           />
         ) : currentStage === 'chapters' ? (
-          <ChaptersStage project={project} elements={elements} chapters={chapters} references={references} />
+          <ChaptersStage project={project} elements={elements} chapters={chapters} references={references} referenceExcerpts={referenceExcerpts} />
         ) : (
           <ElementStage
             stage={currentStage as ElementSection}
@@ -1564,11 +1564,13 @@ function ChaptersStage({
   elements,
   chapters,
   references,
+  referenceExcerpts,
 }: {
   project: RecordData<Project>
   elements: RecordData<StoryElement>[]
   chapters: RecordData<Chapter>[]
   references: RecordData<Reference>[]
+  referenceExcerpts: ReferenceExcerpt[]
 }) {
   const { create, put } = useMutations<Chapter>('chapters')
   const { put: putProject } = useMutations<Project>('projects')
@@ -1579,6 +1581,7 @@ function ChaptersStage({
   const [voiceDraft, setVoiceDraft] = useState({ voiceTone: project.data.voiceTone ?? '', pacing: project.data.pacing ?? '', descriptionStyle: project.data.descriptionStyle ?? '', dialogueStyle: project.data.dialogueStyle ?? '', pointOfView: project.data.pointOfView ?? '', styleNotes: project.data.styleNotes ?? '' })
   const [unlockedChapterStage, setUnlockedChapterStage] = useState(1)
   const [collapsedChapterStages, setCollapsedChapterStages] = useState<Set<number>>(() => new Set())
+  const [isGeneratingVoice, setIsGeneratingVoice] = useState(false)
 
   useEffect(() => {
     setVoiceDraft({ voiceTone: project.data.voiceTone ?? '', pacing: project.data.pacing ?? '', descriptionStyle: project.data.descriptionStyle ?? '', dialogueStyle: project.data.dialogueStyle ?? '', pointOfView: project.data.pointOfView ?? '', styleNotes: project.data.styleNotes ?? '' })
@@ -1589,6 +1592,50 @@ function ChaptersStage({
   function persistVoice(key: keyof Project, value: string) {
     setVoiceDraft((draft) => ({ ...draft, [key]: value }))
     void put(project.recordId, { [key]: value })
+  }
+
+  async function autogenVoiceTone() {
+    setIsGeneratingVoice(true)
+    try {
+      const token = await getAuthToken()
+      const response = await fetch('/api/ai/voice-tone', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', ...(token ? { Authorization: `Bearer ${token}` } : {}) },
+        body: JSON.stringify({
+          project: {
+            title: project.data.title,
+            premise: project.data.premise,
+            genre: project.data.genre,
+            lessonsMorals: project.data.lessonsMorals,
+            targetPages,
+            readingLevel: project.data.readingLevel,
+          },
+          elements: elements.map((element) => ({
+            section: element.data.section,
+            title: element.data.title,
+            summary: element.data.summary,
+            fields: element.data.fields,
+            canonState: element.data.canonState,
+          })),
+          referenceFiles: references.map((reference) => reference.data.fileName),
+          referenceExcerpts,
+        }),
+      })
+      if (!response.ok) return
+      const data = await response.json() as Partial<Pick<Project, 'voiceTone' | 'pacing' | 'descriptionStyle' | 'dialogueStyle' | 'pointOfView' | 'styleNotes'>>
+      const patch = {
+        voiceTone: data.voiceTone ?? '',
+        pacing: data.pacing ?? '',
+        descriptionStyle: data.descriptionStyle ?? '',
+        dialogueStyle: data.dialogueStyle ?? '',
+        pointOfView: data.pointOfView ?? '',
+        styleNotes: data.styleNotes ?? '',
+      }
+      setVoiceDraft(patch)
+      void putProject(project.recordId, patch)
+    } finally {
+      setIsGeneratingVoice(false)
+    }
   }
 
   async function createChapter() {
@@ -1666,6 +1713,12 @@ function ChaptersStage({
           onToggle={() => toggleChapterStage(2)}
         />
         {!collapsedChapterStages.has(2) && <div className="border-t border-border p-5">
+          <div className="mb-4 flex justify-end">
+            <Button variant="outline" size="sm" onClick={autogenVoiceTone} disabled={isGeneratingVoice}>
+              <Sparkles aria-hidden />
+              {isGeneratingVoice ? 'Generating...' : 'Autogen'}
+            </Button>
+          </div>
           <div className="grid gap-4 md:grid-cols-2">
             <Field label="Emotional voice"><Input value={voiceDraft.voiceTone} onChange={(event) => persistVoice('voiceTone', event.target.value)} placeholder={VOICE_TONES.join(', ')} /></Field>
             <Field label="Pacing"><Input value={voiceDraft.pacing} onChange={(event) => persistVoice('pacing', event.target.value)} placeholder={PACINGS.join(', ')} /></Field>

@@ -205,6 +205,51 @@ export function registerAiChatRoutes(
     }
   })
 
+  app.post('/api/ai/voice-tone', async (c) => {
+    const auth = await requireAccess(c)
+    if (auth instanceof Response) return auth
+    const authHeader = c.req.header('Authorization') ?? ''
+    const jwt = authHeader.startsWith('Bearer ') ? authHeader.slice(7) : ''
+    if (!jwt) return c.json({ error: 'Unauthorized' }, 401)
+    const body = await c.req.json<{
+      project?: Record<string, unknown>
+      elements?: Array<Record<string, unknown>>
+      referenceFiles?: string[]
+      referenceExcerpts?: Array<{ fileName?: string; excerpt?: string }>
+    }>()
+    if (!body.project) return c.json({ error: 'project is required' }, 400)
+    const selectedModel = resolveDeepSpaceAgentModel(undefined, 'application')
+    if (!selectedModel) return c.json({ error: 'No application model is configured' }, 503)
+    const { result } = streamDeepSpaceAgent(c.env, {
+      profile: 'application',
+      modelId: selectedModel.modelId,
+      authToken: jwt,
+      system: 'You are Word Forge. Treat reference excerpts as first-class source material. Return only valid JSON with voiceTone, pacing, descriptionStyle, dialogueStyle, pointOfView, and styleNotes. Keep every value concise and directly useful for drafting. Do not imitate a living author; translate inspiration into neutral craft terms. No markdown or preamble.',
+      messages: [{ role: 'user', content: [
+        `Project: ${JSON.stringify(body.project)}`,
+        `Story elements: ${JSON.stringify(body.elements ?? [])}`,
+        `Reference files: ${JSON.stringify(body.referenceFiles ?? [])}`,
+        `Reference excerpts: ${JSON.stringify(body.referenceExcerpts ?? [])}`,
+        'Generate a coherent voice and tone setup for drafting this story.',
+      ].join('\n') }],
+      abortSignal: c.req.raw.signal,
+    })
+    const raw = (await result.text).trim().replace(/^```json\s*|```$/g, '').trim()
+    try {
+      const parsed = JSON.parse(raw) as Record<string, string>
+      return c.json({
+        voiceTone: parsed.voiceTone || '',
+        pacing: parsed.pacing || '',
+        descriptionStyle: parsed.descriptionStyle || '',
+        dialogueStyle: parsed.dialogueStyle || '',
+        pointOfView: parsed.pointOfView || '',
+        styleNotes: parsed.styleNotes || '',
+      })
+    } catch {
+      return c.json({ error: 'The model returned unusable voice settings' }, 422)
+    }
+  })
+
   // Create a new chat row owned by the caller.
   app.post('/api/ai/chats', async (c) => {
     const auth = await requireAccess(c)
