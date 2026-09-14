@@ -423,6 +423,7 @@ function Workspace({
   const [isNewStoryOpen, setIsNewStoryOpen] = useState(openNewStory)
   const [selectedElementId, setSelectedElementId] = useState<string | null>(null)
   const [dismissedLock, setDismissedLock] = useState<Stage | null>(null)
+  const [readSuggestionIds, setReadSuggestionIds] = useState<Set<string>>(() => new Set())
   const { setContext } = useStoryAssistantContext()
   const referenceExcerpts = useReferenceExcerpts(references, true)
   const { put: putProject } = useMutations<Project>('projects')
@@ -439,6 +440,7 @@ function Workspace({
   const pendingSuggestions = suggestions.filter((suggestion) => suggestion.data.status === 'pending')
   const stageSuggestionDots = STAGES.reduce((dots, stage) => {
     dots[stage] = pendingSuggestions.some((suggestion) => {
+      if (readSuggestionIds.has(suggestion.recordId)) return false
       if (stage === 'plot' && suggestion.data.fieldKey === '__timeline__') return true
       if (suggestion.data.targetSection === stage) return true
       return elements.some((element) => element.recordId === suggestion.data.elementId && element.data.section === stage)
@@ -463,6 +465,15 @@ function Workspace({
 
   function openStage(stage: Stage) {
     setActiveStage(stage)
+    setReadSuggestionIds((current) => {
+      const next = new Set(current)
+      pendingSuggestions.forEach((suggestion) => {
+        if (suggestion.data.targetSection === stage || (stage === 'plot' && suggestion.data.fieldKey === '__timeline__') || elements.some((element) => element.recordId === suggestion.data.elementId && element.data.section === stage)) {
+          next.add(suggestion.recordId)
+        }
+      })
+      return next
+    })
     void putProject(project.recordId, { lastOpenStage: stage })
   }
 
@@ -580,7 +591,14 @@ function Workspace({
             allElements={elements}
             references={references}
             referenceExcerpts={referenceExcerpts}
-            onOpen={setSelectedElementId}
+            onOpen={(id) => {
+              setReadSuggestionIds((current) => {
+                const next = new Set(current)
+                suggestions.filter((suggestion) => suggestion.data.elementId === id && suggestion.data.status === 'pending').forEach((suggestion) => next.add(suggestion.recordId))
+                return next
+              })
+              setSelectedElementId(id)
+            }}
             onCompleted={(stage, completedStages) => openStage(nextStageAfterCompletion(stage, completedStages))}
           />
         )}
@@ -757,6 +775,7 @@ function ElementStage({
   const { success } = useToast()
   const [openIdeaId, setOpenIdeaId] = useState<string | null>(null)
   const [timelineCollapsed, setTimelineCollapsed] = useState(false)
+  const [readElementUpdateIds, setReadElementUpdateIds] = useState<Set<string>>(() => new Set())
   const requestedIdeaIds = useRef(new Set<string>())
   const suggestionRequestCount = useRef(0)
   const { enabled } = useSuggestionPreferences()
@@ -999,12 +1018,12 @@ function ElementStage({
           ))}
           {elements.map((element) => {
             const idea = stageSuggestions.find((item) => item.data.elementId === element.recordId && item.data.status === 'pending')
-            const hasAiUpdate = Object.values(element.data.fieldProvenance ?? {}).some((value) => value.startsWith('ai'))
+            const hasAiUpdate = Object.values(element.data.fieldProvenance ?? {}).some((value) => value.startsWith('ai')) && !readElementUpdateIds.has(element.recordId)
             return (
             <article
               key={element.recordId}
-              onClick={() => onOpen(element.recordId)}
-              onKeyDown={(event) => { if (event.key === 'Enter' || event.key === ' ') onOpen(element.recordId) }}
+              onClick={() => { setReadElementUpdateIds((current) => new Set(current).add(element.recordId)); onOpen(element.recordId) }}
+              onKeyDown={(event) => { if (event.key === 'Enter' || event.key === ' ') { setReadElementUpdateIds((current) => new Set(current).add(element.recordId)); onOpen(element.recordId) } }}
               tabIndex={0}
               className="relative min-h-48 cursor-pointer rounded-lg border border-border bg-card p-4 text-left transition-colors hover:bg-accent"
             >
@@ -1883,6 +1902,7 @@ function PlotEventTimeline({ project, elements, references, referenceExcerpts, o
   const [eventCursor, setEventCursor] = useState(0)
   const [focusedEventId, setFocusedEventId] = useState<string | null>(null)
   const [openTimelineIdeaId, setOpenTimelineIdeaId] = useState<string | null>(null)
+  const [readPlotSuggestionIds, setReadPlotSuggestionIds] = useState<Set<string>>(() => new Set())
   const requestedTimelineRanges = useRef(new Set<string>())
   const timelineSuggestionRequestCount = useRef(0)
   const suggestionTick = useRuntimeTick(aiEnabled, AI_SUGGESTION_REFILL_MS)
@@ -1922,6 +1942,8 @@ function PlotEventTimeline({ project, elements, references, referenceExcerpts, o
   const pendingTimelineIdeas = useMemo(() => plotTimelineSuggestions.filter((suggestion) => suggestion.data.status === 'pending'), [plotTimelineSuggestions])
   const positionedTimelineIdeas = pendingTimelineIdeas.filter((suggestion) => Number.isFinite(Number(suggestion.data.proposedFields?.timelinePosition)))
   const sketchTimelineIdeas = pendingTimelineIdeas.filter((suggestion) => !Number.isFinite(Number(suggestion.data.proposedFields?.timelinePosition)))
+  const hasUnreadPositionedIdeas = positionedTimelineIdeas.some((suggestion) => !readPlotSuggestionIds.has(suggestion.recordId))
+  const hasUnreadSketchIdeas = sketchTimelineIdeas.some((suggestion) => !readPlotSuggestionIds.has(suggestion.recordId))
   const visibleTimelineIdeas = positionedTimelineIdeas.slice(0, 3)
   const visibleSketchIdeas = sketchTimelineIdeas.slice(0, 3)
   const hoverTrackX = hoverX === null ? null : hoverX + timelineViewport.left
@@ -2144,6 +2166,16 @@ function PlotEventTimeline({ project, elements, references, referenceExcerpts, o
     if (openTimelineIdeaId === idea.recordId) setOpenTimelineIdeaId(null)
   }
 
+  function openPlotSuggestionView(nextView: 'timeline' | 'events') {
+    setView(nextView)
+    setReadPlotSuggestionIds((current) => {
+      const next = new Set(current)
+      const visibleIdeas = nextView === 'timeline' ? positionedTimelineIdeas : sketchTimelineIdeas
+      visibleIdeas.forEach((suggestion) => next.add(suggestion.recordId))
+      return next
+    })
+  }
+
   function moveVisibleEvent(direction: -1 | 1) {
     if (visibleEventIndex < 0 || positions.length < 2) return
     const nextIndex = visibleEventIndex + direction
@@ -2174,13 +2206,13 @@ function PlotEventTimeline({ project, elements, references, referenceExcerpts, o
         </div>
       </div>
       <div className="mt-4 flex items-center justify-center gap-6 border-b border-border">
-        <button type="button" onClick={() => setView('timeline')} className={cn('flex items-center gap-2 border-b-2 px-2 pb-2 text-sm font-medium', view === 'timeline' ? 'border-primary text-foreground' : 'border-transparent text-muted-foreground')}>
+        <button type="button" onClick={() => openPlotSuggestionView('timeline')} className={cn('flex items-center gap-2 border-b-2 px-2 pb-2 text-sm font-medium', view === 'timeline' ? 'border-primary text-foreground' : 'border-transparent text-muted-foreground')}>
           <span>Timeline</span>
-          {positionedTimelineIdeas.length > 0 && <NotificationDot />}
+          {hasUnreadPositionedIdeas && <NotificationDot />}
         </button>
-        <button type="button" onClick={() => setView('events')} className={cn('flex items-center gap-2 border-b-2 px-2 pb-2 text-sm font-medium', view === 'events' ? 'border-primary text-foreground' : 'border-transparent text-muted-foreground')}>
+        <button type="button" onClick={() => openPlotSuggestionView('events')} className={cn('flex items-center gap-2 border-b-2 px-2 pb-2 text-sm font-medium', view === 'events' ? 'border-primary text-foreground' : 'border-transparent text-muted-foreground')}>
           <span>Events</span>
-          {sketchTimelineIdeas.length > 0 && <NotificationDot />}
+          {hasUnreadSketchIdeas && <NotificationDot />}
         </button>
       </div>
       {view === 'events' ? <EventOrganizer elements={elements} suggestions={visibleSketchIdeas} spanDays={span} selectedId={selectedId} onSelect={setSelectedId} onAddSketchEvent={onAddSketchEvent} onAcceptSuggestion={acceptTimelineIdea} onRejectSuggestion={rejectTimelineIdea} /> : <div ref={trackRef} onScroll={updateTimelineViewport}

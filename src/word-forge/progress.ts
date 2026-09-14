@@ -51,6 +51,7 @@ export function canCompleteStage(stage: Stage, project: Project, elements: Story
 
   const stageElements = elements.filter((element) => element.section === stage)
   if (stage === 'plot' && !project.timelineSpanDays) return false
+  if (stage === 'plot') return stageElements.some(isElementComplete)
   return stageElements.length > 0 && stageElements.every(isElementComplete)
 }
 
@@ -61,8 +62,8 @@ export function validatedCompletedStages(project: Project, elements: StoryElemen
   if (recorded.has('overview') && canCompleteStage('overview', project, elements)) completed.push('overview')
   if (recorded.has('world') && completed.includes('overview') && canCompleteStage('world', project, elements)) completed.push('world')
   if (recorded.has('characters') && completed.includes('world') && canCompleteStage('characters', project, elements)) completed.push('characters')
-  if (recorded.has('plot') && completed.includes('world') && canCompleteStage('plot', project, elements)) completed.push('plot')
-  if (recorded.has('chapters') && completed.includes('characters') && completed.includes('plot')) completed.push('chapters')
+  if ((recorded.has('plot') || canCompleteStage('plot', project, elements)) && completed.includes('world') && canCompleteStage('plot', project, elements)) completed.push('plot')
+  if (recorded.has('chapters') && completed.includes('plot')) completed.push('chapters')
 
   return completed
 }
@@ -85,7 +86,7 @@ export function unlocksFor(completedStages: Stage[]): Stage[] {
     unlocked.add('characters')
     unlocked.add('plot')
   }
-  if (completedStages.includes('characters') && completedStages.includes('plot')) unlocked.add('chapters')
+  if (completedStages.includes('plot')) unlocked.add('chapters')
   return Array.from(unlocked)
 }
 
