@@ -16,7 +16,13 @@
 import { Link } from 'react-router-dom'
 import { APP_NAME } from '../constants'
 
+const LIVE_APP_URL = 'https://wordforge-jakerslam.app.space/home'
+const isGitHubPagesPreview = import.meta.env.BASE_URL.includes('/Deepspace-WordForge/')
+
 export default function Landing() {
+  const appButtonClassName =
+    'rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground transition-opacity hover:opacity-90'
+
   return (
     <div
       data-testid="static-landing"
@@ -28,12 +34,15 @@ export default function Landing() {
         A focused DeepSpace app for worldbuilding, character sheets, plot structure,
         reviewable AI suggestions, and chapter consistency.
       </p>
-      <Link
-        to="/home"
-        className="rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground transition-opacity hover:opacity-90"
-      >
-        Open app
-      </Link>
+      {isGitHubPagesPreview ? (
+        <a href={LIVE_APP_URL} className={appButtonClassName}>
+          Open app
+        </a>
+      ) : (
+        <Link to="/home" className={appButtonClassName}>
+          Open app
+        </Link>
+      )}
     </div>
   )
 }

@@ -2,13 +2,17 @@
 
 Word Forge is a canon-aware prewriting workspace for fiction. Writers construct the world, characters, and plot before generating prose, explicitly approve AI suggestions, and receive warnings when changed canon may make a chapter inconsistent.
 
-The project is being built as a full-stack DeepSpace application for the DeepSpace software engineering internship exercise.
+The project is built as a full-stack DeepSpace application for the DeepSpace software engineering internship exercise.
 
-GitHub Pages preview: [https://jakerslam.github.io/Deepspace-WordForge/](https://jakerslam.github.io/Deepspace-WordForge/)
+Live DeepSpace app: [https://wordforge-jakerslam.app.space](https://wordforge-jakerslam.app.space)
+
+Static GitHub Pages preview: [https://jakerslam.github.io/Deepspace-WordForge/](https://jakerslam.github.io/Deepspace-WordForge/)
+
+The GitHub Pages build is a static preview. Authentication, realtime records, AI routes, and private file storage require the DeepSpace deployment above.
 
 ## Product Status
 
-Word Forge is now scaffolded as a DeepSpace app and the first vertical slice is implemented. The implementation scope is defined in [SRS.md](./SRS.md), the technical direction is captured in [ARCHITECTURE.md](./ARCHITECTURE.md), and the core product states are represented in the Figma file below.
+Word Forge is scaffolded as a DeepSpace app and the first vertical slice is implemented. The implementation scope is defined in [SRS.md](./SRS.md), the technical direction is captured in [ARCHITECTURE.md](./ARCHITECTURE.md), and the core product states are represented in the Figma file below.
 
 ## Product Design
 
@@ -27,7 +31,7 @@ The design covers the gated World workspace, direct card editing, AI suggestion 
 3. Open any card and type directly into its structured fields.
 4. Optionally ask the contextual assistant for help with a selected field.
 5. Accept, reject, or revise an AI suggestion before it becomes canon.
-6. Complete Characters and Plot to unlock Chapters.
+6. Complete Plot with at least one plot point to unlock Chapters.
 7. Generate a chapter from explicitly selected canon elements.
 8. Review the chapter when a linked element changes.
 
@@ -39,20 +43,20 @@ Word Forge is not a one-prompt story generator. Its core is a controlled canon p
 
 AI can propose material, but it cannot silently overwrite the writer's story. Chapters retain links to the elements used to create them so later canon changes remain visible.
 
-## Planned DeepSpace Integrations
+## DeepSpace Integrations
 
 - **Authentication and permissions:** Private story projects owned by authenticated writers.
-- **Realtime records:** Projects, elements, suggestions, chapters, and attachment metadata.
-- **AI chat and tools:** A contextual assistant that reads the selected element and creates reviewable suggestions.
+- **Realtime records:** Projects, elements, suggestions, chapters, reference metadata, and attachment metadata.
+- **AI chat and tools:** A contextual assistant and focused generation routes that read selected story context and create reviewable suggestions.
 - **File storage:** Private R2 storage for card images plus stage-level `.txt` and `.md` references with read-only previews.
 
 Optional co-author collaboration may be added after the core path is complete.
 
 ## Submission Scope
 
-The submission targets five workspace tabs: Overview, World, Characters, Plot, and Chapters. It includes gated stage progression with progressive disclosure inside each stage, genre starter templates, direct structured element editing, Canon and Sketch states, provenance, AI suggestion review, coverage, chapter generation, writing voice settings, and stale-chapter warnings.
+The submission targets five workspace tabs: Overview, World, Characters, Plot, and Chapters. It includes gated stage progression with progressive disclosure inside each stage, genre starter templates, direct structured element editing, Canon and Sketch states, provenance, AI suggestion review, story completion, timeline and event ordering views, writing voice settings, and stale-chapter warnings.
 
-The map editor, visual relationship graph, detailed event timeline, custom card groups, rich-text collaboration, image generation, and indexed knowledge search are intentionally deferred. V1 includes a project-scale timeline span control.
+The map editor, visual relationship graph, custom card groups, rich-text collaboration, image generation, and indexed knowledge search are intentionally deferred.
 
 ## Development
 
