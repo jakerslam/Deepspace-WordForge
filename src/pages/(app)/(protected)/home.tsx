@@ -505,6 +505,8 @@ function Workspace({
         suggestions={suggestions.filter((suggestion) => suggestion.data.elementId === selectedElement.recordId)}
         chapters={chapters}
         attachments={attachments.filter((attachment) => attachment.data.elementId === selectedElement.recordId)}
+        references={references}
+        referenceExcerpts={referenceExcerpts}
         onBack={() => setSelectedElementId(null)}
       />
     )
@@ -1043,6 +1045,8 @@ function ElementEditor({
   suggestions,
   chapters,
   attachments,
+  references,
+  referenceExcerpts,
   onBack,
 }: {
   project: RecordData<Project>
@@ -1051,6 +1055,8 @@ function ElementEditor({
   suggestions: RecordData<Suggestion>[]
   chapters: RecordData<Chapter>[]
   attachments: RecordData<Attachment>[]
+  references: RecordData<Reference>[]
+  referenceExcerpts: ReferenceExcerpt[]
   onBack: () => void
 }) {
   const { put: putElement, remove: removeElement } = useMutations<StoryElement>('elements')
@@ -1059,6 +1065,8 @@ function ElementEditor({
   const { create: createAttachment, put: putAttachment, remove: removeAttachment } = useMutations<Attachment>('attachments')
   const { upload, getUrl, isUploading } = useR2Files()
   const { success } = useToast()
+  const { enabled } = useSuggestionPreferences()
+  const aiEnabled = enabled('ai')
   const [revisionText, setRevisionText] = useState('')
   const [titleDraft, setTitleDraft] = useState(element.data.title)
   const [summaryDraft, setSummaryDraft] = useState(element.data.summary)
@@ -1068,6 +1076,8 @@ function ElementEditor({
   const draftTimers = useRef<Record<string, ReturnType<typeof setTimeout>>>({})
   const [showDeleteModal, setShowDeleteModal] = useState(false)
   const [isDeleting, setIsDeleting] = useState(false)
+  const detailSuggestionRequests = useRef(0)
+  const detailSuggestionTick = useRuntimeTick(aiEnabled && element.data.section === 'plot', AI_SUGGESTION_REFILL_MS)
   const plotSpan = effectiveTimelineSpan(project.data.timelineSpanDays)
   const plotUnit = timelineUnit(plotSpan)
   const plotTimeUnits = storyTimelineUnits(plotSpan)
@@ -1142,21 +1152,50 @@ function ElementEditor({
   }
 
   async function requestSuggestion(fieldKey: string) {
-    const current = element.data.fields[fieldKey] || ''
+    if (suggestions.some((suggestion) => suggestion.data.fieldKey === fieldKey && suggestion.data.status === 'pending')) return
+    const token = await getAuthToken()
+    const response = await fetch('/api/ai/story-idea', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', ...(token ? { Authorization: `Bearer ${token}` } : {}) },
+      body: JSON.stringify({
+        project: { title: project.data.title, genre: project.data.genre, premise: project.data.premise, lessonsMorals: project.data.lessonsMorals },
+        element: { title: element.data.title, type: element.data.type, summary: element.data.summary, fields: element.data.fields },
+        requestedField: fieldKey,
+        referenceFiles: references.map((reference) => reference.data.fileName),
+        referenceExcerpts,
+      }),
+    })
+    if (!response.ok) return
+    const data = await response.json() as { fieldKey?: string; suggestion?: string; proposedTitle?: string; proposedSummary?: string }
+    if (!data.suggestion) return
     await createSuggestion({
       projectId: project.recordId,
       elementId: element.recordId,
       fieldKey,
       prompt: `Improve ${fieldLabel(fieldKey)} for ${element.data.title}`,
-      proposedValue: current
-        ? `${current}\n\nSuggested angle: connect this detail more directly to ${project.data.premise}`
-        : `Draft a concrete ${fieldLabel(fieldKey).toLowerCase()} for ${element.data.title} that supports: ${project.data.premise}`,
+      proposedValue: data.suggestion,
       status: 'pending',
       revisionInstruction: '',
       replacesSuggestionId: '',
+      suggestionType: 'field',
+      targetSection: element.data.section,
+      proposedTitle: data.proposedTitle,
+      proposedSummary: data.proposedSummary,
     })
     success('Suggestion drafted', 'Review it before it becomes canon.')
   }
+
+  useEffect(() => {
+    if (!aiEnabled || element.data.section !== 'plot') return
+    if (detailSuggestionRequests.current >= AI_SESSION_REQUEST_LIMIT) return
+    const openField = Object.entries(element.data.fields).find(([fieldKey, value]) => {
+      if (fieldKey === 'timelinePosition' || value.trim()) return false
+      return !suggestions.some((suggestion) => suggestion.data.fieldKey === fieldKey && suggestion.data.status === 'pending')
+    })?.[0]
+    if (!openField) return
+    detailSuggestionRequests.current++
+    void requestSuggestion(openField)
+  }, [aiEnabled, detailSuggestionTick, element.data.fields, element.data.section, suggestions])
 
   async function addField(title: string) {
     const cleanTitle = title.trim()

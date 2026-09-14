@@ -97,6 +97,7 @@ export function registerAiChatRoutes(
       project?: Record<string, unknown>
       element?: Record<string, unknown>
       preferNewField?: boolean
+      requestedField?: string
       referenceFiles?: string[]
       referenceExcerpts?: Array<{ fileName?: string; excerpt?: string }>
     }>()
@@ -104,7 +105,7 @@ export function registerAiChatRoutes(
     const selectedModel = resolveDeepSpaceAgentModel(undefined, 'application')
     if (!selectedModel) return c.json({ error: 'No application model is configured' }, 503)
     const element = body.element as { title?: string; type?: string; summary?: string; fields?: Record<string, string> }
-    const emptyField = Object.entries(element.fields ?? {}).find(([, value]) => !value?.trim())?.[0]
+    const emptyField = body.requestedField || Object.entries(element.fields ?? {}).find(([, value]) => !value?.trim())?.[0]
     if (!emptyField) return c.json({ error: 'Card has no empty field' }, 400)
     const { result } = streamDeepSpaceAgent(c.env, {
       profile: 'application',
@@ -116,7 +117,7 @@ export function registerAiChatRoutes(
         `Card: ${JSON.stringify(element)}`,
         `Reference files: ${JSON.stringify(body.referenceFiles ?? [])}`,
         `Reference excerpts: ${JSON.stringify(body.referenceExcerpts ?? [])}`,
-        body.preferNewField ? 'You must suggest a new field not already present on this card.' : `Suggest either a useful detail for empty field "${emptyField}", a new field that would deepen this card, or a new related sub-card.`,
+        body.preferNewField ? 'You must suggest a new field not already present on this card.' : body.requestedField ? `Suggest a concrete, usable detail for field "${emptyField}" on this card.` : `Suggest either a useful detail for empty field "${emptyField}", a new field that would deepen this card, or a new related sub-card.`,
       ].join('\n') }],
       abortSignal: c.req.raw.signal,
     })
