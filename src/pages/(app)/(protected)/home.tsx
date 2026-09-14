@@ -380,6 +380,15 @@ function Workspace({
     ? activeStage
     : unlockedStages[unlockedStages.length - 1] as Stage
   const computedCoverage = storyCoverage(project.data, elements.map((element) => element.data), chapters.map((chapter) => chapter.data))
+  const pendingSuggestions = suggestions.filter((suggestion) => suggestion.data.status === 'pending')
+  const stageSuggestionDots = STAGES.reduce((dots, stage) => {
+    dots[stage] = pendingSuggestions.some((suggestion) => {
+      if (stage === 'plot' && suggestion.data.fieldKey === '__timeline__') return true
+      if (suggestion.data.targetSection === stage) return true
+      return elements.some((element) => element.recordId === suggestion.data.elementId && element.data.section === stage)
+    })
+    return dots
+  }, {} as Record<Stage, boolean>)
 
   useEffect(() => {
     if (openNewStory) {
@@ -468,7 +477,8 @@ function Workspace({
               )}
             >
               {locked && <Lock className="size-3.5" aria-hidden />}
-              {STAGE_LABELS[stage]}
+              <span>{STAGE_LABELS[stage]}</span>
+              {stageSuggestionDots[stage] && <NotificationDot />}
             </button>
             {locked && dismissedLock !== stage && <div role="status" className="pointer-events-none absolute left-1/2 top-11 z-20 hidden w-48 -translate-x-1/2 rounded-md border border-border bg-popover p-2 text-xs text-popover-foreground shadow-md group-hover:block group-focus-within:block">
               <button type="button" aria-label="Close blocker" title="Close blocker" onClick={() => setDismissedLock(stage)} className="pointer-events-auto absolute right-1 top-1 text-muted-foreground hover:text-foreground"><X className="size-3.5" aria-hidden /></button>
@@ -1793,7 +1803,10 @@ function PlotEventTimeline({ project, elements, references, onOpen, onAddEvent, 
   const viewportEndDays = Math.min(span, ((timelineViewport.left + timelineViewport.width - TIMELINE_EDGE_PADDING_PX) / measuredTimelineWidthPixels) * span)
   const plotTimelineSuggestions = useMemo(() => timelineSuggestions.filter((suggestion) => suggestion.data.fieldKey === '__timeline__'), [timelineSuggestions])
   const pendingTimelineIdeas = useMemo(() => plotTimelineSuggestions.filter((suggestion) => suggestion.data.status === 'pending'), [plotTimelineSuggestions])
-  const visibleTimelineIdeas = pendingTimelineIdeas.slice(0, 3)
+  const positionedTimelineIdeas = pendingTimelineIdeas.filter((suggestion) => Number.isFinite(Number(suggestion.data.proposedFields?.timelinePosition)))
+  const sketchTimelineIdeas = pendingTimelineIdeas.filter((suggestion) => !Number.isFinite(Number(suggestion.data.proposedFields?.timelinePosition)))
+  const visibleTimelineIdeas = positionedTimelineIdeas.slice(0, 3)
+  const visibleSketchIdeas = sketchTimelineIdeas.slice(0, 3)
   const hoverTrackX = hoverX === null ? null : hoverX + timelineViewport.left
   const hoverDays = hoverTrackX === null || hoverTrackX < TIMELINE_EDGE_PADDING_PX || hoverTrackX > trackWidthPixels - TIMELINE_EDGE_PADDING_PX
     ? null
@@ -2066,10 +2079,16 @@ function PlotEventTimeline({ project, elements, references, onOpen, onAddEvent, 
         </div>
       </div>
       <div className="mt-4 flex items-center justify-center gap-6 border-b border-border">
-        <button type="button" onClick={() => setView('timeline')} className={cn('border-b-2 px-2 pb-2 text-sm font-medium', view === 'timeline' ? 'border-primary text-foreground' : 'border-transparent text-muted-foreground')}>Timeline</button>
-        <button type="button" onClick={() => setView('events')} className={cn('border-b-2 px-2 pb-2 text-sm font-medium', view === 'events' ? 'border-primary text-foreground' : 'border-transparent text-muted-foreground')}>Events</button>
+        <button type="button" onClick={() => setView('timeline')} className={cn('flex items-center gap-2 border-b-2 px-2 pb-2 text-sm font-medium', view === 'timeline' ? 'border-primary text-foreground' : 'border-transparent text-muted-foreground')}>
+          <span>Timeline</span>
+          {positionedTimelineIdeas.length > 0 && <NotificationDot />}
+        </button>
+        <button type="button" onClick={() => setView('events')} className={cn('flex items-center gap-2 border-b-2 px-2 pb-2 text-sm font-medium', view === 'events' ? 'border-primary text-foreground' : 'border-transparent text-muted-foreground')}>
+          <span>Events</span>
+          {sketchTimelineIdeas.length > 0 && <NotificationDot />}
+        </button>
       </div>
-      {view === 'events' ? <EventOrganizer elements={elements} suggestions={visibleTimelineIdeas} spanDays={span} selectedId={selectedId} onSelect={setSelectedId} onAddSketchEvent={onAddSketchEvent} onAcceptSuggestion={acceptTimelineIdea} onRejectSuggestion={rejectTimelineIdea} /> : <div ref={trackRef} onScroll={updateTimelineViewport}
+      {view === 'events' ? <EventOrganizer elements={elements} suggestions={visibleSketchIdeas} spanDays={span} selectedId={selectedId} onSelect={setSelectedId} onAddSketchEvent={onAddSketchEvent} onAcceptSuggestion={acceptTimelineIdea} onRejectSuggestion={rejectTimelineIdea} /> : <div ref={trackRef} onScroll={updateTimelineViewport}
         onPointerMove={(event) => {
           if (event.pointerType === 'touch') return
           const viewport = event.currentTarget
@@ -2489,6 +2508,10 @@ function ProgressLine({ value, className }: { value: number; className?: string 
       <div className="h-full rounded-full bg-primary transition-all" style={{ width: `${Math.max(0, Math.min(100, value))}%` }} />
     </div>
   )
+}
+
+function NotificationDot() {
+  return <span className="size-2 shrink-0 rounded-full bg-sky-500 shadow-[0_0_0_2px_hsl(var(--background))]" aria-label="Pending suggestion" />
 }
 
 function Field({
