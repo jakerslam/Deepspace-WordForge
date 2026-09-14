@@ -1719,6 +1719,27 @@ function normalizeIdeaTitle(value?: string) {
   return (value ?? '').toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim()
 }
 
+function ideaFingerprint(title?: string, summary?: string) {
+  return normalizeIdeaTitle(`${title ?? ''} ${summary ?? ''}`)
+}
+
+function ideaTokens(value: string) {
+  return new Set(value.split(' ').filter((token) => token.length > 3))
+}
+
+function isSimilarStoryBeat(candidate: string, existing: string) {
+  if (!candidate || !existing) return false
+  if (candidate.includes(existing) || existing.includes(candidate)) return true
+  const candidateTokens = ideaTokens(candidate)
+  const existingTokens = ideaTokens(existing)
+  if (candidateTokens.size < 4 || existingTokens.size < 4) return false
+  let overlap = 0
+  candidateTokens.forEach((token) => {
+    if (existingTokens.has(token)) overlap++
+  })
+  return overlap / Math.min(candidateTokens.size, existingTokens.size) >= 0.62
+}
+
 function PlotEventTimeline({ project, elements, references, onOpen, onAddEvent, onAddSketchEvent, aiEnabled }: { project: RecordData<Project>; elements: RecordData<StoryElement>[]; references: RecordData<Reference>[]; onOpen: (id: string) => void; onAddEvent: (days: number, detail?: { title: string; summary: string }) => void; onAddSketchEvent: () => void; aiEnabled: boolean }) {
   const trackRef = useRef<HTMLDivElement>(null)
   const [view, setView] = useState<'timeline' | 'events'>('timeline')
@@ -1730,7 +1751,10 @@ function PlotEventTimeline({ project, elements, references, onOpen, onAddEvent, 
   const [eventCursor, setEventCursor] = useState(0)
   const [focusedEventId, setFocusedEventId] = useState<string | null>(null)
   const [openTimelineIdeaId, setOpenTimelineIdeaId] = useState<string | null>(null)
+  const [referenceExcerpts, setReferenceExcerpts] = useState<Array<{ fileName: string; excerpt: string }>>([])
   const requestedTimelineRanges = useRef(new Set<string>())
+  const loadedReferenceKeys = useRef(new Set<string>())
+  const { readFile } = useR2Files()
   const { records: timelineSuggestions } = useQuery<Suggestion>('suggestions', { where: { projectId: project.recordId }, orderBy: 'createdAt', orderDir: 'desc' })
   const { create: createTimelineSuggestion, put: putTimelineSuggestion } = useMutations<Suggestion>('suggestions')
   const readPosition = (element: RecordData<StoryElement>) => {
@@ -1807,6 +1831,30 @@ function PlotEventTimeline({ project, elements, references, onOpen, onAddEvent, 
       : hoverX > timelineViewport.width * 0.95 ? 1 : 0
 
   useEffect(() => {
+    if (!aiEnabled || references.length === 0) return
+    let cancelled = false
+    void (async () => {
+      const nextExcerpts: Array<{ fileName: string; excerpt: string }> = []
+      for (const reference of references.slice(0, 6)) {
+        if (loadedReferenceKeys.current.has(reference.data.fileKey)) continue
+        loadedReferenceKeys.current.add(reference.data.fileKey)
+        try {
+          const response = await readFile(reference.data.fileKey)
+          if (!response.ok) continue
+          const excerpt = (await response.text()).replace(/\s+/g, ' ').trim().slice(0, 1800)
+          if (excerpt) nextExcerpts.push({ fileName: reference.data.fileName, excerpt })
+        } catch {
+          // Reference context is helpful, but plot suggestions still work without it.
+        }
+      }
+      if (!cancelled && nextExcerpts.length) {
+        setReferenceExcerpts((current) => [...current, ...nextExcerpts].slice(0, 6))
+      }
+    })()
+    return () => { cancelled = true }
+  }, [aiEnabled, readFile, references])
+
+  useEffect(() => {
     if (!aiEnabled || pendingTimelineIdeas.length >= 3 || viewportEndDays <= viewportStartDays) return
     const rangeKey = `${Math.round(viewportStartDays / smallestUnit.days)}:${Math.round(viewportEndDays / smallestUnit.days)}:${zoomLevel}:${pendingTimelineIdeas.length}:${plotTimelineSuggestions.length}`
     if (requestedTimelineRanges.current.has(rangeKey)) return
@@ -1827,6 +1875,8 @@ function PlotEventTimeline({ project, elements, references, onOpen, onAddEvent, 
             existingEvents: elements.map((element) => ({
               title: element.data.title,
               summary: element.data.summary || firstFilledField(element.data),
+              fields: element.data.fields,
+              canonState: element.data.canonState,
               positionDays: element.data.fields.timelinePosition,
             })),
             previousSuggestions: plotTimelineSuggestions.map((suggestion) => ({
@@ -1835,18 +1885,19 @@ function PlotEventTimeline({ project, elements, references, onOpen, onAddEvent, 
               status: suggestion.data.status,
             })),
             referenceFiles: references.map((reference) => reference.data.fileName),
+            referenceExcerpts,
           }),
         })
         if (!response.ok || controller.signal.aborted) return
         const payload = await response.json() as { ideas?: Array<{ title?: string; description?: string; positionDays?: number }> }
-        const seenTitles = new Set([
-          ...elements.map((element) => normalizeIdeaTitle(element.data.title)),
-          ...plotTimelineSuggestions.map((suggestion) => normalizeIdeaTitle(suggestion.data.proposedTitle)),
-        ])
+        const existingBeats = [
+          ...elements.map((element) => ideaFingerprint(element.data.title, `${element.data.summary} ${Object.values(element.data.fields).join(' ')}`)),
+          ...plotTimelineSuggestions.map((suggestion) => ideaFingerprint(suggestion.data.proposedTitle, suggestion.data.proposedSummary || suggestion.data.proposedValue)),
+        ].filter(Boolean)
         for (const idea of payload.ideas ?? []) {
-          const titleKey = normalizeIdeaTitle(idea.title)
-          if (!idea.title || !titleKey || seenTitles.has(titleKey) || !Number.isFinite(idea.positionDays)) continue
-          seenTitles.add(titleKey)
+          const candidateBeat = ideaFingerprint(idea.title, idea.description)
+          if (!idea.title || !candidateBeat || existingBeats.some((beat) => isSimilarStoryBeat(candidateBeat, beat)) || !Number.isFinite(idea.positionDays)) continue
+          existingBeats.push(candidateBeat)
           await createTimelineSuggestion({
             projectId: project.recordId,
             elementId: '',
@@ -1868,7 +1919,7 @@ function PlotEventTimeline({ project, elements, references, onOpen, onAddEvent, 
       }
     })()
     return () => controller.abort()
-  }, [aiEnabled, createTimelineSuggestion, elements, pendingTimelineIdeas.length, plotTimelineSuggestions, project.data.genre, project.data.lessonsMorals, project.data.premise, project.data.title, project.recordId, references, smallestUnit.days, viewportEndDays, viewportStartDays, zoomLevel])
+  }, [aiEnabled, createTimelineSuggestion, elements, pendingTimelineIdeas.length, plotTimelineSuggestions, project.data.genre, project.data.lessonsMorals, project.data.premise, project.data.title, project.recordId, referenceExcerpts, references, smallestUnit.days, viewportEndDays, viewportStartDays, zoomLevel])
 
   useEffect(() => {
     const viewport = trackRef.current

@@ -138,6 +138,7 @@ export function registerAiChatRoutes(
       existingEvents?: Array<{ title?: string; summary?: string; positionDays?: number | string | null }>
       previousSuggestions?: Array<{ title?: string; summary?: string; status?: string }>
       referenceFiles?: string[]
+      referenceExcerpts?: Array<{ fileName?: string; excerpt?: string }>
     }>()
     if (!body.project || !Number.isFinite(body.startDays) || !Number.isFinite(body.endDays)) return c.json({ error: 'project and timeline range are required' }, 400)
     const startDays = body.startDays as number
@@ -158,6 +159,8 @@ export function registerAiChatRoutes(
           `Existing plot events: ${JSON.stringify(body.existingEvents ?? [])}`,
           `Previous suggestions: ${JSON.stringify(body.previousSuggestions ?? [])}`,
           `Reference files available to the story: ${JSON.stringify(body.referenceFiles ?? [])}`,
+          `Reference excerpts: ${JSON.stringify(body.referenceExcerpts ?? [])}`,
+          'Do not restate or rename an existing event. A useful idea should add a new cause, consequence, complication, reversal, discovery, or decision.',
           'Prefer ideas that can be accepted as timeline events or kept as unordered plot sketches.',
         ].join('\n'),
       }],
