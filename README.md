@@ -4,6 +4,8 @@ Word Forge is a canon-aware prewriting workspace for fiction. Writers construct 
 
 The project is being built as a full-stack DeepSpace application for the DeepSpace software engineering internship exercise.
 
+GitHub Pages preview: [https://jakerslam.github.io/Deepspace-WordForge/](https://jakerslam.github.io/Deepspace-WordForge/)
+
 ## Product Status
 
 Word Forge is now scaffolded as a DeepSpace app and the first vertical slice is implemented. The implementation scope is defined in [SRS.md](./SRS.md), the technical direction is captured in [ARCHITECTURE.md](./ARCHITECTURE.md), and the core product states are represented in the Figma file below.

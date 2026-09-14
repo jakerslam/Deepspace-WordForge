@@ -9,6 +9,7 @@ import { deepspaceBuild } from 'deepspace/build'
 const appDir = fileURLToPath(new URL('.', import.meta.url))
 
 export default defineConfig({
+  base: process.env.GITHUB_PAGES ? '/Deepspace-WordForge/' : '/',
   plugins: [
     react(),
     generouted(),

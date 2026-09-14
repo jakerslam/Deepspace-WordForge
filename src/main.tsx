@@ -6,7 +6,9 @@ import { createBrowserRouter, RouterProvider } from 'react-router'
 import { installStaleChunkRecovery } from './stale-chunk-recovery'
 import './styles.css'
 
-const router = createBrowserRouter(routes)
+const router = createBrowserRouter(routes, {
+  basename: import.meta.env.BASE_URL,
+})
 installStaleChunkRecovery(router)
 
 createRoot(document.getElementById('root')!).render(<RouterProvider router={router} />)
