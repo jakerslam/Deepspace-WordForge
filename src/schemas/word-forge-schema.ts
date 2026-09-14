@@ -25,6 +25,7 @@ export const projectsSchema: CollectionSchema = {
     { name: 'styleNotes', storage: 'text', interpretation: 'plain' },
     { name: 'completedStages', storage: 'text', interpretation: { kind: 'json' } },
     { name: 'unlockedStages', storage: 'text', interpretation: { kind: 'json' } },
+    { name: 'lastOpenStage', storage: 'text', interpretation: { kind: 'select', options: ['overview', 'world', 'characters', 'plot', 'chapters'] } },
     { name: 'stageAttention', storage: 'text', interpretation: { kind: 'json' } },
     { name: 'overallCoverage', storage: 'number', interpretation: 'plain' },
   ],

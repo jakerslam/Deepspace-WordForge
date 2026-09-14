@@ -31,6 +31,7 @@ export interface Project {
   styleNotes: string
   completedStages: Stage[]
   unlockedStages: Stage[]
+  lastOpenStage?: Stage
   stageAttention: Partial<Record<Stage, boolean>>
   overallCoverage: number
 }

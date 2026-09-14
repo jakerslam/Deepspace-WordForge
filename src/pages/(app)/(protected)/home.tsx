@@ -80,6 +80,10 @@ const POINTS_OF_VIEW = ['First person', 'Close third person', 'Omniscient', 'Sec
 const ROLE_OPTIONS = ['Protagonist', 'Antagonist', 'Supporting', 'Mentor', 'Love interest']
 const READING_LEVELS: Project['readingLevel'][] = ['Elementary', 'Pre-teen', 'Teen', 'Adult']
 
+function isStage(value: unknown): value is Stage {
+  return typeof value === 'string' && STAGES.includes(value as Stage)
+}
+
 const FIELD_LABELS: Record<string, string> = {
   rules: 'Rules',
   limits: 'Limits',
@@ -294,6 +298,7 @@ function CreateProjectCard({ onOpen }: { onOpen: (id: string) => void }) {
       styleNotes: '',
       completedStages: [],
       unlockedStages: ['overview'],
+      lastOpenStage: 'overview',
       stageAttention: {},
       overallCoverage: 0,
     })
@@ -367,7 +372,7 @@ function Workspace({
   openNewStory: boolean
   onNewStoryHandled: () => void
 }) {
-  const [activeStage, setActiveStage] = useState<Stage>('overview')
+  const [activeStage, setActiveStage] = useState<Stage>(() => isStage(project.data.lastOpenStage) ? project.data.lastOpenStage : 'overview')
   const [isNewStoryOpen, setIsNewStoryOpen] = useState(openNewStory)
   const [selectedElementId, setSelectedElementId] = useState<string | null>(null)
   const [dismissedLock, setDismissedLock] = useState<Stage | null>(null)
@@ -375,11 +380,14 @@ function Workspace({
   const { put: putProject } = useMutations<Project>('projects')
   const selectedElement = elements.find((element) => element.recordId === selectedElementId) ?? null
   const validatedStages = useMemo(() => validatedCompletedStages(project.data, elements.map((element) => element.data)), [elements, project.data])
-  const unlockedStages = useMemo(() => unlocksFor(validatedStages), [validatedStages])
+  const computedUnlockedStages = useMemo(() => unlocksFor(validatedStages), [validatedStages])
+  const recordedUnlockedStages = useMemo(() => (project.data.unlockedStages ?? ['overview']).filter(isStage), [project.data.unlockedStages])
+  const unlockedStages = useMemo(() => STAGES.filter((stage) => recordedUnlockedStages.includes(stage) || computedUnlockedStages.includes(stage)), [computedUnlockedStages, recordedUnlockedStages])
   const currentStage: Stage = unlockedStages.includes(activeStage)
     ? activeStage
     : unlockedStages[unlockedStages.length - 1] as Stage
-  const computedCoverage = storyCoverage(project.data, elements.map((element) => element.data), chapters.map((chapter) => chapter.data))
+  const hydratedProject = useMemo(() => ({ ...project.data, completedStages: validatedStages.length >= (project.data.completedStages ?? []).length ? validatedStages : project.data.completedStages, unlockedStages }), [project.data, unlockedStages, validatedStages])
+  const computedCoverage = storyCoverage(hydratedProject, elements.map((element) => element.data), chapters.map((chapter) => chapter.data))
   const pendingSuggestions = suggestions.filter((suggestion) => suggestion.data.status === 'pending')
   const stageSuggestionDots = STAGES.reduce((dots, stage) => {
     dots[stage] = pendingSuggestions.some((suggestion) => {
@@ -405,6 +413,17 @@ function Workspace({
     void putProject(recordId, { overallCoverage: coverageValue })
   }
 
+  function openStage(stage: Stage) {
+    setActiveStage(stage)
+    void putProject(project.recordId, { lastOpenStage: stage })
+  }
+
+  useEffect(() => {
+    const preferred = isStage(project.data.lastOpenStage) ? project.data.lastOpenStage : activeStage
+    const nextStage = unlockedStages.includes(preferred) ? preferred : unlockedStages[unlockedStages.length - 1] as Stage
+    setActiveStage(nextStage)
+  }, [activeStage, project.data.lastOpenStage, project.recordId, unlockedStages])
+
   useEffect(() => {
     if (computedCoverage !== project.data.overallCoverage) {
       void updateProjectCoverage(project.recordId, computedCoverage)
@@ -414,8 +433,9 @@ function Workspace({
   useEffect(() => {
     const recordedCompleted = project.data.completedStages ?? []
     const recordedUnlocked = project.data.unlockedStages ?? []
-    if (JSON.stringify(recordedCompleted) === JSON.stringify(validatedStages) && JSON.stringify(recordedUnlocked) === JSON.stringify(unlockedStages)) return
-    void putProject(project.recordId, { completedStages: validatedStages, unlockedStages })
+    const completedStages = validatedStages.length >= recordedCompleted.length ? validatedStages : recordedCompleted
+    if (JSON.stringify(recordedCompleted) === JSON.stringify(completedStages) && JSON.stringify(recordedUnlocked) === JSON.stringify(unlockedStages)) return
+    void putProject(project.recordId, { completedStages, unlockedStages })
   }, [project.data.completedStages, project.data.unlockedStages, project.recordId, putProject, unlockedStages, validatedStages])
 
   useEffect(() => {
@@ -468,7 +488,7 @@ function Workspace({
             <button
               type="button"
               disabled={locked}
-              onClick={() => setActiveStage(stage)}
+              onClick={() => openStage(stage)}
               onMouseEnter={() => { if (locked) setDismissedLock(null) }}
               className={cn(
                 'flex h-9 items-center gap-2 rounded-md px-3 text-sm transition-colors',
@@ -495,7 +515,7 @@ function Workspace({
             project={project}
             elements={elements}
             references={references}
-            onCompleted={(completedStages) => setActiveStage(nextStageAfterCompletion('overview', completedStages))}
+            onCompleted={(completedStages) => openStage(nextStageAfterCompletion('overview', completedStages))}
           />
         ) : currentStage === 'chapters' ? (
           <ChaptersStage project={project} elements={elements} chapters={chapters} references={references} />
@@ -507,7 +527,7 @@ function Workspace({
             allElements={elements}
             references={references}
             onOpen={setSelectedElementId}
-            onCompleted={(stage, completedStages) => setActiveStage(nextStageAfterCompletion(stage, completedStages))}
+            onCompleted={(stage, completedStages) => openStage(nextStageAfterCompletion(stage, completedStages))}
           />
         )}
       </main>
