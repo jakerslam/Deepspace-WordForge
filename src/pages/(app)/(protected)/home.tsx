@@ -80,6 +80,10 @@ const POINTS_OF_VIEW = ['First person', 'Close third person', 'Omniscient', 'Sec
 const ROLE_OPTIONS = ['Protagonist', 'Antagonist', 'Supporting', 'Mentor', 'Love interest']
 const READING_LEVELS: Project['readingLevel'][] = ['Elementary', 'Pre-teen', 'Teen', 'Adult']
 type ReferenceExcerpt = { fileName: string; excerpt: string }
+const AI_SUGGESTION_REFILL_MS = 45_000
+const AI_CARD_PENDING_LIMIT = 3
+const AI_PLOT_PENDING_LIMIT = 3
+const AI_SESSION_REQUEST_LIMIT = 24
 
 function isStage(value: unknown): value is Stage {
   return typeof value === 'string' && STAGES.includes(value as Stage)
@@ -115,6 +119,16 @@ function useReferenceExcerpts(references: RecordData<Reference>[], enabled: bool
   }, [enabled, readFile, references])
 
   return referenceExcerpts
+}
+
+function useRuntimeTick(enabled: boolean, intervalMs: number) {
+  const [tick, setTick] = useState(0)
+  useEffect(() => {
+    if (!enabled) return
+    const interval = window.setInterval(() => setTick((value) => value + 1), intervalMs)
+    return () => window.clearInterval(interval)
+  }, [enabled, intervalMs])
+  return tick
 }
 
 const FIELD_LABELS: Record<string, string> = {
@@ -742,8 +756,11 @@ function ElementStage({
   const [openIdeaId, setOpenIdeaId] = useState<string | null>(null)
   const [timelineCollapsed, setTimelineCollapsed] = useState(false)
   const requestedIdeaIds = useRef(new Set<string>())
+  const suggestionRequestCount = useRef(0)
   const { enabled } = useSuggestionPreferences()
   const aiEnabled = enabled('ai')
+  const setupReady = stage === 'plot' ? Boolean(project.data.timelineSpanDays) : true
+  const suggestionTick = useRuntimeTick(aiEnabled && setupReady, AI_SUGGESTION_REFILL_MS)
   const completionTriggered = useRef(false)
   const { records: stageSuggestions } = useQuery<Suggestion>('suggestions', {
     where: { projectId: project.recordId },
@@ -752,24 +769,26 @@ function ElementStage({
   })
   const coverage = stageCoverage(stage, project.data, allElements.map((element) => element.data))
   const cardIdeas = stageSuggestions.filter((item) => item.data.suggestionType === 'card' && item.data.status === 'pending' && (!item.data.targetSection || item.data.targetSection === stage))
-  const setupReady = stage === 'plot' ? Boolean(project.data.timelineSpanDays) : true
 
   useEffect(() => {
     if (!setupReady || !aiEnabled) return
     const controller = new AbortController()
-    if (stageSuggestions.some((suggestion) => suggestion.data.suggestionType === 'card' && suggestion.data.status === 'pending')) return
+    if (suggestionRequestCount.current >= AI_SESSION_REQUEST_LIMIT) return
+    const pendingStageIdeas = stageSuggestions.filter((suggestion) => suggestion.data.suggestionType === 'card' && suggestion.data.status === 'pending' && (!suggestion.data.targetSection || suggestion.data.targetSection === stage))
+    if (pendingStageIdeas.length >= AI_CARD_PENDING_LIMIT) return
     const candidate = elements.find((item) => {
       if (elementCoverage(item.data) === 100 || requestedIdeaIds.current.has(item.recordId)) return false
       return !stageSuggestions.some((suggestion) => suggestion.data.elementId === item.recordId && suggestion.data.status === 'pending')
     })
     if (!candidate) return
     requestedIdeaIds.current.add(candidate.recordId)
+    suggestionRequestCount.current++
     const hasAcceptedIdea = stageSuggestions.some((suggestion) => suggestion.data.elementId === candidate.recordId && suggestion.data.status === 'accepted')
     void createStoryIdea(project, candidate, createSuggestion, hasAcceptedIdea, references, referenceExcerpts, controller.signal)
       .catch(() => {})
       .finally(() => requestedIdeaIds.current.delete(candidate.recordId))
     return () => controller.abort()
-  }, [aiEnabled, createSuggestion, elements, project, referenceExcerpts, references, setupReady, stageSuggestions])
+  }, [aiEnabled, createSuggestion, elements, project, referenceExcerpts, references, setupReady, stage, stageSuggestions, suggestionTick])
 
   useEffect(() => {
     if (stage === 'plot' && setupReady) setTimelineCollapsed(true)
@@ -1826,6 +1845,8 @@ function PlotEventTimeline({ project, elements, references, referenceExcerpts, o
   const [focusedEventId, setFocusedEventId] = useState<string | null>(null)
   const [openTimelineIdeaId, setOpenTimelineIdeaId] = useState<string | null>(null)
   const requestedTimelineRanges = useRef(new Set<string>())
+  const timelineSuggestionRequestCount = useRef(0)
+  const suggestionTick = useRuntimeTick(aiEnabled, AI_SUGGESTION_REFILL_MS)
   const { records: timelineSuggestions } = useQuery<Suggestion>('suggestions', { where: { projectId: project.recordId }, orderBy: 'createdAt', orderDir: 'desc' })
   const { create: createTimelineSuggestion, put: putTimelineSuggestion } = useMutations<Suggestion>('suggestions')
   const readPosition = (element: RecordData<StoryElement>) => {
@@ -1905,10 +1926,12 @@ function PlotEventTimeline({ project, elements, references, referenceExcerpts, o
       : hoverX > timelineViewport.width * 0.95 ? 1 : 0
 
   useEffect(() => {
-    if (!aiEnabled || pendingTimelineIdeas.length >= 3 || viewportEndDays <= viewportStartDays) return
-    const rangeKey = `${Math.round(viewportStartDays / smallestUnit.days)}:${Math.round(viewportEndDays / smallestUnit.days)}:${zoomLevel}:${pendingTimelineIdeas.length}:${plotTimelineSuggestions.length}`
+    if (!aiEnabled || pendingTimelineIdeas.length >= AI_PLOT_PENDING_LIMIT || viewportEndDays <= viewportStartDays) return
+    if (timelineSuggestionRequestCount.current >= AI_SESSION_REQUEST_LIMIT) return
+    const rangeKey = `${Math.round(viewportStartDays / smallestUnit.days)}:${Math.round(viewportEndDays / smallestUnit.days)}:${zoomLevel}:${pendingTimelineIdeas.length}:${plotTimelineSuggestions.length}:${suggestionTick}`
     if (requestedTimelineRanges.current.has(rangeKey)) return
     requestedTimelineRanges.current.add(rangeKey)
+    timelineSuggestionRequestCount.current++
     const controller = new AbortController()
     void (async () => {
       try {
@@ -1921,7 +1944,7 @@ function PlotEventTimeline({ project, elements, references, referenceExcerpts, o
             project: { title: project.data.title, genre: project.data.genre, premise: project.data.premise, lessonsMorals: project.data.lessonsMorals },
             startDays: viewportStartDays,
             endDays: viewportEndDays,
-            count: 3 - pendingTimelineIdeas.length,
+            count: AI_PLOT_PENDING_LIMIT - pendingTimelineIdeas.length,
             existingEvents: elements.map((element) => ({
               title: element.data.title,
               summary: element.data.summary || firstFilledField(element.data),
@@ -1970,7 +1993,7 @@ function PlotEventTimeline({ project, elements, references, referenceExcerpts, o
       }
     })()
     return () => controller.abort()
-  }, [aiEnabled, createTimelineSuggestion, elements, pendingTimelineIdeas.length, plotTimelineSuggestions, project.data.genre, project.data.lessonsMorals, project.data.premise, project.data.title, project.recordId, referenceExcerpts, references, smallestUnit.days, viewportEndDays, viewportStartDays, zoomLevel])
+  }, [aiEnabled, createTimelineSuggestion, elements, pendingTimelineIdeas.length, plotTimelineSuggestions, project.data.genre, project.data.lessonsMorals, project.data.premise, project.data.title, project.recordId, referenceExcerpts, references, smallestUnit.days, suggestionTick, viewportEndDays, viewportStartDays, zoomLevel])
 
   useEffect(() => {
     const viewport = trackRef.current
