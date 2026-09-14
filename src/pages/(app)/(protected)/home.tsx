@@ -89,6 +89,14 @@ function isStage(value: unknown): value is Stage {
   return typeof value === 'string' && STAGES.includes(value as Stage)
 }
 
+function pageTargetRange(targetPages: number) {
+  const pages = Math.max(5, targetPages || 100)
+  return {
+    min: Math.max(1, Math.round(pages * 0.95)),
+    max: Math.round(pages * 1.05),
+  }
+}
+
 function useReferenceExcerpts(references: RecordData<Reference>[], enabled: boolean) {
   const [referenceExcerpts, setReferenceExcerpts] = useState<ReferenceExcerpt[]>([])
   const loadedReferenceKeys = useRef(new Set<string>())
@@ -504,7 +512,8 @@ function Workspace({
     const referenceContext = referenceExcerpts.length
       ? `Reference docs:\n${referenceExcerpts.map((reference) => `- ${reference.fileName}: ${reference.excerpt}`).join('\n')}`
       : references.length ? `Reference docs attached: ${references.map((reference) => reference.data.fileName).join(', ')}` : 'Reference docs: none attached'
-    setContext(`Project: ${project.data.title}\nGenre: ${project.data.genre}\nPremise: ${project.data.premise}\nLessons or morals: ${project.data.lessonsMorals ?? ''}\nTarget length: ${project.data.targetPages ?? 100} pages\nReading level: ${project.data.readingLevel ?? 'Adult'}\nVoice & Tone: ${project.data.voiceTone ?? ''}; ${project.data.pacing ?? ''} pacing; ${project.data.descriptionStyle ?? ''} description; ${project.data.dialogueStyle ?? ''} dialogue; ${project.data.pointOfView ?? ''}\n${referenceContext}\n${card}`)
+    const pageRange = pageTargetRange(project.data.targetPages ?? 100)
+    setContext(`Project: ${project.data.title}\nGenre: ${project.data.genre}\nPremise: ${project.data.premise}\nLessons or morals: ${project.data.lessonsMorals ?? ''}\nTarget length: ${pageRange.min}-${pageRange.max} pages, centered on ${project.data.targetPages ?? 100} pages\nReading level: ${project.data.readingLevel ?? 'Adult'}\nVoice & Tone: ${project.data.voiceTone ?? ''}; ${project.data.pacing ?? ''} pacing; ${project.data.descriptionStyle ?? ''} description; ${project.data.dialogueStyle ?? ''} dialogue; ${project.data.pointOfView ?? ''}\n${referenceContext}\n${card}`)
   }, [currentStage, project.data.dialogueStyle, project.data.descriptionStyle, project.data.genre, project.data.lessonsMorals, project.data.pacing, project.data.pointOfView, project.data.premise, project.data.readingLevel, project.data.targetPages, project.data.title, project.data.voiceTone, referenceExcerpts, references, selectedElement, setContext])
 
   if (selectedElement) {
@@ -1565,6 +1574,7 @@ function ChaptersStage({
   const { put: putProject } = useMutations<Project>('projects')
   const canonElements = elements.filter((element) => element.data.canonState === 'Canon')
   const targetPages = project.data.targetPages || 100
+  const targetPageRange = pageTargetRange(targetPages)
   const recommendedChapters = Math.max(1, Math.round(targetPages / 20))
   const [voiceDraft, setVoiceDraft] = useState({ voiceTone: project.data.voiceTone ?? '', pacing: project.data.pacing ?? '', descriptionStyle: project.data.descriptionStyle ?? '', dialogueStyle: project.data.dialogueStyle ?? '', pointOfView: project.data.pointOfView ?? '', styleNotes: project.data.styleNotes ?? '' })
 
@@ -1616,7 +1626,7 @@ function ChaptersStage({
         </div>
         <div className="mt-5 grid gap-5 md:grid-cols-2">
           <Field label="Story length">
-            <div className="flex items-center justify-between text-sm text-muted-foreground"><span>5 pages</span><strong className="text-foreground">{targetPages} pages</strong><span>1,500 pages</span></div>
+            <div className="flex items-center justify-between text-sm text-muted-foreground"><span>5 pages</span><strong className="text-foreground">{targetPageRange.min}-{targetPageRange.max} pages</strong><span>1,500 pages</span></div>
             <input type="range" min="5" max="1500" step="5" value={targetPages} onChange={(event) => putProject(project.recordId, { targetPages: Number(event.target.value) })} aria-label="Story length in pages" className="mt-3 w-full accent-primary" />
           </Field>
           <Field label="Reading level">
