@@ -153,10 +153,10 @@ export function registerAiChatRoutes(
         'You are Word Forge running a plot-suggestion workflow.',
         'Step 1: infer the existing plot beats from the project, reference excerpts, existing events, and prior suggestions.',
         'Step 2: identify missing or underdeveloped functions such as cause, consequence, complication, reversal, discovery, decision, escalation, sacrifice, reveal, climax, or aftermath.',
-        'Step 3: return only new events that fill one of those gaps in the visible timeline range.',
+        'Step 3: return a mix of timeline events and unordered sketch events. Timeline events should fill a gap in the visible timeline range. Sketch events should be interesting to include somewhere, but not require a specific order yet.',
         'Do not restate, rename, summarize, or lightly vary an existing event or previous suggestion.',
-        'Return only valid JSON with an ideas array. Each idea must include title, description, positionDays, beatFunction, and whyDistinct.',
-        'Each title must be under 60 characters, each description under 220 characters, and each positionDays must be a number inside the provided range. No markdown or preamble.',
+        'Return only valid JSON with an ideas array. Each idea must include title, description, placement, beatFunction, and whyDistinct. placement must be either "timeline" or "sketch". Include positionDays only when placement is "timeline".',
+        'Each title must be under 60 characters, each description under 220 characters, and timeline positionDays must be a number inside the provided range. No markdown or preamble.',
       ].join(' '),
       messages: [{
         role: 'user',
@@ -168,21 +168,22 @@ export function registerAiChatRoutes(
           `Previous suggestions: ${JSON.stringify(body.previousSuggestions ?? [])}`,
           `Reference files available to the story: ${JSON.stringify(body.referenceFiles ?? [])}`,
           `Reference excerpts: ${JSON.stringify(body.referenceExcerpts ?? [])}`,
+          'For each idea, placement should be "timeline" when chronology matters and "sketch" when it is simply interesting to include somewhere.',
           'For each idea, beatFunction should name the story function it fills. whyDistinct should briefly explain why this is not already covered by existing events or reference material.',
-          'Prefer ideas that can be accepted as timeline events or kept as unordered plot sketches.',
         ].join('\n'),
       }],
       abortSignal: c.req.raw.signal,
     })
     const raw = (await result.text).trim().replace(/^```json\s*|```$/g, '').trim()
     try {
-      type TimelineIdeaResponse = { title?: string; description?: string; positionDays?: number; beatFunction?: string; whyDistinct?: string }
+      type TimelineIdeaResponse = { title?: string; description?: string; positionDays?: number; placement?: 'timeline' | 'sketch'; beatFunction?: string; whyDistinct?: string }
       const parsed = JSON.parse(raw) as { ideas?: TimelineIdeaResponse[] } | TimelineIdeaResponse
       const rawIdeas: TimelineIdeaResponse[] = 'ideas' in parsed && Array.isArray(parsed.ideas) ? parsed.ideas : [parsed as TimelineIdeaResponse]
       const ideas = rawIdeas.map((idea) => {
-        const position = Math.max(startDays, Math.min(endDays, Number(idea.positionDays)))
-        if (!Number.isFinite(position)) return null
-        return { title: idea.title || 'Suggested event', description: idea.description || '', positionDays: position, beatFunction: idea.beatFunction || '', whyDistinct: idea.whyDistinct || '' }
+        const placement = idea.placement === 'sketch' ? 'sketch' : 'timeline'
+        const position = placement === 'timeline' ? Math.max(startDays, Math.min(endDays, Number(idea.positionDays))) : null
+        if (placement === 'timeline' && !Number.isFinite(position)) return null
+        return { title: idea.title || 'Suggested event', description: idea.description || '', placement, positionDays: position, beatFunction: idea.beatFunction || '', whyDistinct: idea.whyDistinct || '' }
       }).filter(Boolean).slice(0, 3)
       if (!ideas.length) throw new Error('Invalid position')
       return c.json({ ideas })
