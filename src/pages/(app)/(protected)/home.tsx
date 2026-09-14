@@ -1577,9 +1577,13 @@ function ChaptersStage({
   const targetPageRange = pageTargetRange(targetPages)
   const recommendedChapters = Math.max(1, Math.round(targetPages / 20))
   const [voiceDraft, setVoiceDraft] = useState({ voiceTone: project.data.voiceTone ?? '', pacing: project.data.pacing ?? '', descriptionStyle: project.data.descriptionStyle ?? '', dialogueStyle: project.data.dialogueStyle ?? '', pointOfView: project.data.pointOfView ?? '', styleNotes: project.data.styleNotes ?? '' })
+  const [unlockedChapterStage, setUnlockedChapterStage] = useState(1)
+  const [collapsedChapterStages, setCollapsedChapterStages] = useState<Set<number>>(() => new Set())
 
   useEffect(() => {
     setVoiceDraft({ voiceTone: project.data.voiceTone ?? '', pacing: project.data.pacing ?? '', descriptionStyle: project.data.descriptionStyle ?? '', dialogueStyle: project.data.dialogueStyle ?? '', pointOfView: project.data.pointOfView ?? '', styleNotes: project.data.styleNotes ?? '' })
+    setUnlockedChapterStage(1)
+    setCollapsedChapterStages(new Set())
   }, [project.recordId])
 
   function persistVoice(key: keyof Project, value: string) {
@@ -1613,54 +1617,82 @@ function ChaptersStage({
     })
   }
 
+  function unlockChapterStage(stage: number) {
+    setUnlockedChapterStage((current) => Math.max(current, stage))
+    setCollapsedChapterStages((current) => new Set(current).add(stage - 1))
+  }
+
+  function toggleChapterStage(stage: number) {
+    setCollapsedChapterStages((current) => {
+      const next = new Set(current)
+      if (next.has(stage)) next.delete(stage)
+      else next.add(stage)
+      return next
+    })
+  }
+
   return (
     <section>
       <ReferenceFiles projectId={project.recordId} stage="chapters" references={references} />
-      <section className="mb-5 rounded-lg border border-border bg-card p-5">
-        <div className="flex items-start justify-between gap-3">
-          <div>
-            <h2 className="text-lg font-semibold text-foreground">Stage 1: Draft settings</h2>
-            <p className="mt-1 text-sm text-muted-foreground">Set the scale and audience before drafting. The assistant will use these targets when shaping chapters.</p>
+      <section className="mb-5 overflow-hidden rounded-lg border border-border bg-card">
+        <PhaseHeader
+          title="Stage 1: Draft settings"
+          description={collapsedChapterStages.has(1) ? 'Completed stage collapsed.' : 'Set the scale and audience before drafting.'}
+          collapsible={unlockedChapterStage > 1}
+          collapsed={collapsedChapterStages.has(1)}
+          onToggle={() => toggleChapterStage(1)}
+        />
+        {!collapsedChapterStages.has(1) && <div className="border-t border-border p-5">
+          <div className="flex justify-end"><Badge variant="outline">About {recommendedChapters} chapters</Badge></div>
+          <div className="mt-5 grid gap-5 md:grid-cols-2">
+            <Field label="Story length">
+              <div className="flex items-center justify-between text-sm text-muted-foreground"><span>5 pages</span><strong className="text-foreground">{targetPageRange.min}-{targetPageRange.max} pages</strong><span>1,500 pages</span></div>
+              <input type="range" min="5" max="1500" step="5" value={targetPages} onChange={(event) => putProject(project.recordId, { targetPages: Number(event.target.value) })} aria-label="Story length in pages" className="mt-3 w-full accent-primary" />
+            </Field>
+            <Field label="Reading level">
+              <div className="flex items-center justify-between text-sm text-muted-foreground"><span>Elementary</span><strong className="text-foreground">{project.data.readingLevel ?? 'Adult'}</strong><span>Adult</span></div>
+              <input type="range" min="0" max={READING_LEVELS.length - 1} step="1" value={Math.max(0, READING_LEVELS.indexOf(project.data.readingLevel ?? 'Adult'))} onChange={(event) => putProject(project.recordId, { readingLevel: READING_LEVELS[Number(event.target.value)] })} aria-label="Reading level" className="mt-3 w-full accent-primary" />
+            </Field>
           </div>
-          <Badge variant="outline">About {recommendedChapters} chapters</Badge>
-        </div>
-        <div className="mt-5 grid gap-5 md:grid-cols-2">
-          <Field label="Story length">
-            <div className="flex items-center justify-between text-sm text-muted-foreground"><span>5 pages</span><strong className="text-foreground">{targetPageRange.min}-{targetPageRange.max} pages</strong><span>1,500 pages</span></div>
-            <input type="range" min="5" max="1500" step="5" value={targetPages} onChange={(event) => putProject(project.recordId, { targetPages: Number(event.target.value) })} aria-label="Story length in pages" className="mt-3 w-full accent-primary" />
-          </Field>
-          <Field label="Reading level">
-            <div className="flex items-center justify-between text-sm text-muted-foreground"><span>Elementary</span><strong className="text-foreground">{project.data.readingLevel ?? 'Adult'}</strong><span>Adult</span></div>
-            <input type="range" min="0" max={READING_LEVELS.length - 1} step="1" value={Math.max(0, READING_LEVELS.indexOf(project.data.readingLevel ?? 'Adult'))} onChange={(event) => putProject(project.recordId, { readingLevel: READING_LEVELS[Number(event.target.value)] })} aria-label="Reading level" className="mt-3 w-full accent-primary" />
-          </Field>
-        </div>
+          <div className="mt-5 flex justify-start"><Button size="sm" onClick={() => unlockChapterStage(2)}>Next</Button></div>
+        </div>}
       </section>
-      <section className="mb-5 rounded-lg border border-border bg-card p-5">
-        <h2 className="text-lg font-semibold text-foreground">Stage 2: Voice &amp; Tone</h2>
-        <p className="mt-1 text-sm text-muted-foreground">Writing settings for the draft itself. These stay editable as the manuscript develops.</p>
-        <div className="mt-4 grid gap-4 md:grid-cols-2">
-          <Field label="Emotional voice"><Input value={voiceDraft.voiceTone} onChange={(event) => persistVoice('voiceTone', event.target.value)} placeholder={VOICE_TONES.join(', ')} /></Field>
-          <Field label="Pacing"><Input value={voiceDraft.pacing} onChange={(event) => persistVoice('pacing', event.target.value)} placeholder={PACINGS.join(', ')} /></Field>
-          <Field label="Description style"><Input value={voiceDraft.descriptionStyle} onChange={(event) => persistVoice('descriptionStyle', event.target.value)} placeholder={DESCRIPTION_STYLES.join(', ')} /></Field>
-          <Field label="Dialogue style"><Input value={voiceDraft.dialogueStyle} onChange={(event) => persistVoice('dialogueStyle', event.target.value)} placeholder={DIALOGUE_STYLES.join(', ')} /></Field>
-          <Field label="Point of view"><Input value={voiceDraft.pointOfView} onChange={(event) => persistVoice('pointOfView', event.target.value)} placeholder={POINTS_OF_VIEW.join(', ')} /></Field>
-          <Field label="Inspiration notes"><Input value={voiceDraft.styleNotes} onChange={(event) => persistVoice('styleNotes', event.target.value)} placeholder="Short sentences, dry humor, close interiority" /></Field>
-        </div>
-      </section>
-      <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
-        <div>
-          <h2 className="text-lg font-semibold text-foreground">Chapters</h2>
-          <p className="mt-1 text-sm text-muted-foreground">
-            Draft chapters from selected canon and flag them when linked elements change.
-          </p>
-        </div>
-        <Button onClick={createChapter}>
-          <Plus aria-hidden />
-          Add chapter
-        </Button>
-      </div>
-
-      <div className="mt-5 grid gap-4">
+      {unlockedChapterStage >= 2 && <section className="mb-5 overflow-hidden rounded-lg border border-border bg-card">
+        <PhaseHeader
+          title="Stage 2: Voice & Tone"
+          description={collapsedChapterStages.has(2) ? 'Completed stage collapsed.' : 'Writing settings for the draft itself.'}
+          collapsible={unlockedChapterStage > 2}
+          collapsed={collapsedChapterStages.has(2)}
+          onToggle={() => toggleChapterStage(2)}
+        />
+        {!collapsedChapterStages.has(2) && <div className="border-t border-border p-5">
+          <div className="grid gap-4 md:grid-cols-2">
+            <Field label="Emotional voice"><Input value={voiceDraft.voiceTone} onChange={(event) => persistVoice('voiceTone', event.target.value)} placeholder={VOICE_TONES.join(', ')} /></Field>
+            <Field label="Pacing"><Input value={voiceDraft.pacing} onChange={(event) => persistVoice('pacing', event.target.value)} placeholder={PACINGS.join(', ')} /></Field>
+            <Field label="Description style"><Input value={voiceDraft.descriptionStyle} onChange={(event) => persistVoice('descriptionStyle', event.target.value)} placeholder={DESCRIPTION_STYLES.join(', ')} /></Field>
+            <Field label="Dialogue style"><Input value={voiceDraft.dialogueStyle} onChange={(event) => persistVoice('dialogueStyle', event.target.value)} placeholder={DIALOGUE_STYLES.join(', ')} /></Field>
+            <Field label="Point of view"><Input value={voiceDraft.pointOfView} onChange={(event) => persistVoice('pointOfView', event.target.value)} placeholder={POINTS_OF_VIEW.join(', ')} /></Field>
+            <Field label="Inspiration notes"><Input value={voiceDraft.styleNotes} onChange={(event) => persistVoice('styleNotes', event.target.value)} placeholder="Short sentences, dry humor, close interiority" /></Field>
+          </div>
+          <div className="mt-5 flex justify-start"><Button size="sm" onClick={() => unlockChapterStage(3)}>Next</Button></div>
+        </div>}
+      </section>}
+      {unlockedChapterStage >= 3 && <section className="overflow-hidden rounded-lg border border-border bg-card">
+        <PhaseHeader
+          title="Stage 3: Write"
+          description="Draft chapters from selected canon and flag them when linked elements change."
+          collapsible={false}
+          collapsed={false}
+          onToggle={() => {}}
+        />
+        <div className="border-t border-border p-5">
+          <div className="flex justify-end">
+            <Button onClick={createChapter}>
+              <Plus aria-hidden />
+              Add chapter
+            </Button>
+          </div>
+          <div className="mt-5 grid gap-4">
         {chapters.map((chapter) => {
           const stale = isStale(chapter) || chapter.data.consistencyStatus === 'Needs review'
           return (
@@ -1725,7 +1757,9 @@ function ChaptersStage({
             </article>
           )
         })}
-      </div>
+          </div>
+        </div>
+      </section>}
     </section>
   )
 }
