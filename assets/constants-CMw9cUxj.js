@@ -1,0 +1,1 @@
+var e=`Word Forge`,t=`app:app_01M271W9Z7TGDRER4KH35WFSHS`;export{t as n,e as t};
