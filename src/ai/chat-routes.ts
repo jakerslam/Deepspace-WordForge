@@ -93,7 +93,13 @@ export function registerAiChatRoutes(
     const authHeader = c.req.header('Authorization') ?? ''
     const jwt = authHeader.startsWith('Bearer ') ? authHeader.slice(7) : ''
     if (!jwt) return c.json({ error: 'Unauthorized' }, 401)
-    const body = await c.req.json<{ project?: Record<string, unknown>; element?: Record<string, unknown>; preferNewField?: boolean }>()
+    const body = await c.req.json<{
+      project?: Record<string, unknown>
+      element?: Record<string, unknown>
+      preferNewField?: boolean
+      referenceFiles?: string[]
+      referenceExcerpts?: Array<{ fileName?: string; excerpt?: string }>
+    }>()
     if (!body.project || !body.element) return c.json({ error: 'project and element are required' }, 400)
     const selectedModel = resolveDeepSpaceAgentModel(undefined, 'application')
     if (!selectedModel) return c.json({ error: 'No application model is configured' }, 503)
@@ -104,8 +110,14 @@ export function registerAiChatRoutes(
       profile: 'application',
       modelId: selectedModel.modelId,
       authToken: jwt,
-      system: 'You are Word Forge. Return only valid JSON with keys kind, fieldKey, title, description, and idea. kind must be field, new-field, or card. Use new-field when the card needs a field not already present. Keep title under 60 characters, description under 160 characters, and idea under 400 characters. No markdown or preamble.',
-      messages: [{ role: 'user', content: `Project: ${JSON.stringify(body.project)}\nCard: ${JSON.stringify(element)}\n${body.preferNewField ? 'You must suggest a new field not already present on this card.' : `Suggest either a useful detail for empty field "${emptyField}", a new field that would deepen this card, or a new related sub-card.`}` }],
+      system: 'You are Word Forge. Treat uploaded reference excerpts as first-class source material. Return only valid JSON with keys kind, fieldKey, title, description, and idea. kind must be field, new-field, or card. Use new-field when the card needs a field not already present. Keep title under 60 characters, description under 160 characters, and idea under 400 characters. Do not contradict reference excerpts unless the user asks for alternatives. No markdown or preamble.',
+      messages: [{ role: 'user', content: [
+        `Project: ${JSON.stringify(body.project)}`,
+        `Card: ${JSON.stringify(element)}`,
+        `Reference files: ${JSON.stringify(body.referenceFiles ?? [])}`,
+        `Reference excerpts: ${JSON.stringify(body.referenceExcerpts ?? [])}`,
+        body.preferNewField ? 'You must suggest a new field not already present on this card.' : `Suggest either a useful detail for empty field "${emptyField}", a new field that would deepen this card, or a new related sub-card.`,
+      ].join('\n') }],
       abortSignal: c.req.raw.signal,
     })
     const raw = (await result.text).trim().replace(/^```json\s*|```$/g, '').trim()

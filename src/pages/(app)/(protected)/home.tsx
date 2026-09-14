@@ -79,9 +79,42 @@ const DIALOGUE_STYLES = ['Conversational', 'Witty', 'Formal', 'Understated', 'Ra
 const POINTS_OF_VIEW = ['First person', 'Close third person', 'Omniscient', 'Second person']
 const ROLE_OPTIONS = ['Protagonist', 'Antagonist', 'Supporting', 'Mentor', 'Love interest']
 const READING_LEVELS: Project['readingLevel'][] = ['Elementary', 'Pre-teen', 'Teen', 'Adult']
+type ReferenceExcerpt = { fileName: string; excerpt: string }
 
 function isStage(value: unknown): value is Stage {
   return typeof value === 'string' && STAGES.includes(value as Stage)
+}
+
+function useReferenceExcerpts(references: RecordData<Reference>[], enabled: boolean) {
+  const [referenceExcerpts, setReferenceExcerpts] = useState<ReferenceExcerpt[]>([])
+  const loadedReferenceKeys = useRef(new Set<string>())
+  const { readFile } = useR2Files()
+
+  useEffect(() => {
+    if (!enabled || references.length === 0) return
+    let cancelled = false
+    void (async () => {
+      const nextExcerpts: ReferenceExcerpt[] = []
+      for (const reference of references.slice(0, 8)) {
+        if (loadedReferenceKeys.current.has(reference.data.fileKey)) continue
+        loadedReferenceKeys.current.add(reference.data.fileKey)
+        try {
+          const response = await readFile(reference.data.fileKey)
+          if (!response.ok) continue
+          const excerpt = (await response.text()).replace(/\s+/g, ' ').trim().slice(0, 2200)
+          if (excerpt) nextExcerpts.push({ fileName: reference.data.fileName, excerpt })
+        } catch {
+          // Reference context should enrich AI help, never block the workspace.
+        }
+      }
+      if (!cancelled && nextExcerpts.length) {
+        setReferenceExcerpts((current) => [...current, ...nextExcerpts].slice(0, 8))
+      }
+    })()
+    return () => { cancelled = true }
+  }, [enabled, readFile, references])
+
+  return referenceExcerpts
 }
 
 const FIELD_LABELS: Record<string, string> = {
@@ -377,6 +410,7 @@ function Workspace({
   const [selectedElementId, setSelectedElementId] = useState<string | null>(null)
   const [dismissedLock, setDismissedLock] = useState<Stage | null>(null)
   const { setContext } = useStoryAssistantContext()
+  const referenceExcerpts = useReferenceExcerpts(references, true)
   const { put: putProject } = useMutations<Project>('projects')
   const selectedElement = elements.find((element) => element.recordId === selectedElementId) ?? null
   const validatedStages = useMemo(() => validatedCompletedStages(project.data, elements.map((element) => element.data)), [elements, project.data])
@@ -442,8 +476,11 @@ function Workspace({
     const card = selectedElement
       ? `Selected card: ${selectedElement.data.title}\nCard type: ${selectedElement.data.type}\nSummary: ${selectedElement.data.summary || 'Empty'}\nFields:\n${Object.entries(selectedElement.data.fields).map(([key, value]) => `- ${key}: ${value || 'Empty'}`).join('\\n')}`
       : `No card selected. Story area: ${STAGE_LABELS[currentStage]}`
-    setContext(`Project: ${project.data.title}\nGenre: ${project.data.genre}\nPremise: ${project.data.premise}\nLessons or morals: ${project.data.lessonsMorals ?? ''}\nTarget length: ${project.data.targetPages ?? 100} pages\nReading level: ${project.data.readingLevel ?? 'Adult'}\nVoice & Tone: ${project.data.voiceTone ?? ''}; ${project.data.pacing ?? ''} pacing; ${project.data.descriptionStyle ?? ''} description; ${project.data.dialogueStyle ?? ''} dialogue; ${project.data.pointOfView ?? ''}\n${card}`)
-  }, [currentStage, project.data.dialogueStyle, project.data.descriptionStyle, project.data.genre, project.data.lessonsMorals, project.data.pacing, project.data.pointOfView, project.data.premise, project.data.readingLevel, project.data.targetPages, project.data.title, project.data.voiceTone, selectedElement, setContext])
+    const referenceContext = referenceExcerpts.length
+      ? `Reference docs:\n${referenceExcerpts.map((reference) => `- ${reference.fileName}: ${reference.excerpt}`).join('\n')}`
+      : references.length ? `Reference docs attached: ${references.map((reference) => reference.data.fileName).join(', ')}` : 'Reference docs: none attached'
+    setContext(`Project: ${project.data.title}\nGenre: ${project.data.genre}\nPremise: ${project.data.premise}\nLessons or morals: ${project.data.lessonsMorals ?? ''}\nTarget length: ${project.data.targetPages ?? 100} pages\nReading level: ${project.data.readingLevel ?? 'Adult'}\nVoice & Tone: ${project.data.voiceTone ?? ''}; ${project.data.pacing ?? ''} pacing; ${project.data.descriptionStyle ?? ''} description; ${project.data.dialogueStyle ?? ''} dialogue; ${project.data.pointOfView ?? ''}\n${referenceContext}\n${card}`)
+  }, [currentStage, project.data.dialogueStyle, project.data.descriptionStyle, project.data.genre, project.data.lessonsMorals, project.data.pacing, project.data.pointOfView, project.data.premise, project.data.readingLevel, project.data.targetPages, project.data.title, project.data.voiceTone, referenceExcerpts, references, selectedElement, setContext])
 
   if (selectedElement) {
     return (
@@ -526,6 +563,7 @@ function Workspace({
             elements={elements.filter((element) => element.data.section === currentStage)}
             allElements={elements}
             references={references}
+            referenceExcerpts={referenceExcerpts}
             onOpen={setSelectedElementId}
             onCompleted={(stage, completedStages) => openStage(nextStageAfterCompletion(stage, completedStages))}
           />
@@ -684,6 +722,7 @@ function ElementStage({
   elements,
   allElements,
   references,
+  referenceExcerpts,
   onOpen,
   onCompleted,
 }: {
@@ -692,6 +731,7 @@ function ElementStage({
   elements: RecordData<StoryElement>[]
   allElements: RecordData<StoryElement>[]
   references: RecordData<Reference>[]
+  referenceExcerpts: ReferenceExcerpt[]
   onOpen: (id: string) => void
   onCompleted: (stage: ElementSection, completedStages: Stage[]) => void
 }) {
@@ -725,11 +765,11 @@ function ElementStage({
     if (!candidate) return
     requestedIdeaIds.current.add(candidate.recordId)
     const hasAcceptedIdea = stageSuggestions.some((suggestion) => suggestion.data.elementId === candidate.recordId && suggestion.data.status === 'accepted')
-    void createStoryIdea(project, candidate, createSuggestion, hasAcceptedIdea, controller.signal)
+    void createStoryIdea(project, candidate, createSuggestion, hasAcceptedIdea, references, referenceExcerpts, controller.signal)
       .catch(() => {})
       .finally(() => requestedIdeaIds.current.delete(candidate.recordId))
     return () => controller.abort()
-  }, [aiEnabled, createSuggestion, elements, project, setupReady, stageSuggestions])
+  }, [aiEnabled, createSuggestion, elements, project, referenceExcerpts, references, setupReady, stageSuggestions])
 
   useEffect(() => {
     if (stage === 'plot' && setupReady) setTimelineCollapsed(true)
@@ -922,7 +962,7 @@ function ElementStage({
 
         {setupReady && <TropeSuggestions stage={stage} genre={project.data.genre} hasWrittenContent={elements.some((element) => isElementComplete(element.data))} onUse={useTrope} />}
 
-        {stage === 'plot' ? <PlotEventTimeline project={project} elements={elements} references={references} onOpen={onOpen} onAddEvent={addTimelineEvent} onAddSketchEvent={addSketchEvent} aiEnabled={aiEnabled} /> : <div className={cn('mt-5 grid gap-3 transition-opacity sm:grid-cols-2 xl:grid-cols-3', !setupReady && 'pointer-events-none opacity-0')}>
+        {stage === 'plot' ? <PlotEventTimeline project={project} elements={elements} references={references} referenceExcerpts={referenceExcerpts} onOpen={onOpen} onAddEvent={addTimelineEvent} onAddSketchEvent={addSketchEvent} aiEnabled={aiEnabled} /> : <div className={cn('mt-5 grid gap-3 transition-opacity sm:grid-cols-2 xl:grid-cols-3', !setupReady && 'pointer-events-none opacity-0')}>
           {aiEnabled && cardIdeas.map((idea) => (
             <article key={idea.recordId} className="rounded-lg border border-dashed border-primary/50 bg-primary/5 p-4">
               <div className="flex items-start justify-between gap-3">
@@ -1774,7 +1814,7 @@ function clampNumber(value: number, min: number, max: number) {
   return Math.max(min, Math.min(max, value))
 }
 
-function PlotEventTimeline({ project, elements, references, onOpen, onAddEvent, onAddSketchEvent, aiEnabled }: { project: RecordData<Project>; elements: RecordData<StoryElement>[]; references: RecordData<Reference>[]; onOpen: (id: string) => void; onAddEvent: (days: number, detail?: { title: string; summary: string }) => void; onAddSketchEvent: (detail?: { title: string; summary: string }) => void; aiEnabled: boolean }) {
+function PlotEventTimeline({ project, elements, references, referenceExcerpts, onOpen, onAddEvent, onAddSketchEvent, aiEnabled }: { project: RecordData<Project>; elements: RecordData<StoryElement>[]; references: RecordData<Reference>[]; referenceExcerpts: ReferenceExcerpt[]; onOpen: (id: string) => void; onAddEvent: (days: number, detail?: { title: string; summary: string }) => void; onAddSketchEvent: (detail?: { title: string; summary: string }) => void; aiEnabled: boolean }) {
   const trackRef = useRef<HTMLDivElement>(null)
   const [view, setView] = useState<'timeline' | 'events'>('timeline')
   const [selectedId, setSelectedId] = useState<string | null>(null)
@@ -1785,10 +1825,7 @@ function PlotEventTimeline({ project, elements, references, onOpen, onAddEvent, 
   const [eventCursor, setEventCursor] = useState(0)
   const [focusedEventId, setFocusedEventId] = useState<string | null>(null)
   const [openTimelineIdeaId, setOpenTimelineIdeaId] = useState<string | null>(null)
-  const [referenceExcerpts, setReferenceExcerpts] = useState<Array<{ fileName: string; excerpt: string }>>([])
   const requestedTimelineRanges = useRef(new Set<string>())
-  const loadedReferenceKeys = useRef(new Set<string>())
-  const { readFile } = useR2Files()
   const { records: timelineSuggestions } = useQuery<Suggestion>('suggestions', { where: { projectId: project.recordId }, orderBy: 'createdAt', orderDir: 'desc' })
   const { create: createTimelineSuggestion, put: putTimelineSuggestion } = useMutations<Suggestion>('suggestions')
   const readPosition = (element: RecordData<StoryElement>) => {
@@ -1866,30 +1903,6 @@ function PlotEventTimeline({ project, elements, references, onOpen, onAddEvent, 
   const edgeScrollDirection = hoverX === null ? 0
     : hoverX < timelineViewport.width * 0.05 ? -1
       : hoverX > timelineViewport.width * 0.95 ? 1 : 0
-
-  useEffect(() => {
-    if (!aiEnabled || references.length === 0) return
-    let cancelled = false
-    void (async () => {
-      const nextExcerpts: Array<{ fileName: string; excerpt: string }> = []
-      for (const reference of references.slice(0, 6)) {
-        if (loadedReferenceKeys.current.has(reference.data.fileKey)) continue
-        loadedReferenceKeys.current.add(reference.data.fileKey)
-        try {
-          const response = await readFile(reference.data.fileKey)
-          if (!response.ok) continue
-          const excerpt = (await response.text()).replace(/\s+/g, ' ').trim().slice(0, 1800)
-          if (excerpt) nextExcerpts.push({ fileName: reference.data.fileName, excerpt })
-        } catch {
-          // Reference context is helpful, but plot suggestions still work without it.
-        }
-      }
-      if (!cancelled && nextExcerpts.length) {
-        setReferenceExcerpts((current) => [...current, ...nextExcerpts].slice(0, 6))
-      }
-    })()
-    return () => { cancelled = true }
-  }, [aiEnabled, readFile, references])
 
   useEffect(() => {
     if (!aiEnabled || pendingTimelineIdeas.length >= 3 || viewportEndDays <= viewportStartDays) return
@@ -2617,6 +2630,8 @@ async function createStoryIdea(
   element: RecordData<StoryElement>,
   createSuggestion: (data: Omit<Suggestion, 'projectId'> & { projectId: string }) => Promise<string>,
   preferNewField = false,
+  references: RecordData<Reference>[] = [],
+  referenceExcerpts: ReferenceExcerpt[] = [],
   signal?: AbortSignal,
 ) {
   const token = await getAuthToken()
@@ -2627,6 +2642,8 @@ async function createStoryIdea(
     body: JSON.stringify({
       project: { title: project.data.title, genre: project.data.genre, premise: project.data.premise },
       element: { title: element.data.title, type: element.data.type, summary: element.data.summary, fields: element.data.fields },
+      referenceFiles: references.map((reference) => reference.data.fileName),
+      referenceExcerpts,
       preferNewField,
     }),
   })
