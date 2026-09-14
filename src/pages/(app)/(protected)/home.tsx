@@ -1609,7 +1609,7 @@ function ChaptersStage({
       <section className="mb-5 rounded-lg border border-border bg-card p-5">
         <div className="flex items-start justify-between gap-3">
           <div>
-            <h2 className="text-lg font-semibold text-foreground">Draft settings</h2>
+            <h2 className="text-lg font-semibold text-foreground">Stage 1: Draft settings</h2>
             <p className="mt-1 text-sm text-muted-foreground">Set the scale and audience before drafting. The assistant will use these targets when shaping chapters.</p>
           </div>
           <Badge variant="outline">About {recommendedChapters} chapters</Badge>
@@ -1626,7 +1626,7 @@ function ChaptersStage({
         </div>
       </section>
       <section className="mb-5 rounded-lg border border-border bg-card p-5">
-        <h2 className="text-lg font-semibold text-foreground">Voice &amp; Tone</h2>
+        <h2 className="text-lg font-semibold text-foreground">Stage 2: Voice &amp; Tone</h2>
         <p className="mt-1 text-sm text-muted-foreground">Writing settings for the draft itself. These stay editable as the manuscript develops.</p>
         <div className="mt-4 grid gap-4 md:grid-cols-2">
           <Field label="Emotional voice"><Input value={voiceDraft.voiceTone} onChange={(event) => persistVoice('voiceTone', event.target.value)} placeholder={VOICE_TONES.join(', ')} /></Field>
